@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "relio-mobile",
+    "slug": "relio-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "platforms": ["ios", "android"],
+    "userInterfaceStyle": "automatic"
+  }
+}

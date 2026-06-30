@@ -146,6 +146,7 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+.claude/
 *.suo
 *.ntvs*
 *.njsproj

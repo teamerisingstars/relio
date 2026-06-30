@@ -6,14 +6,17 @@ def test_add_request_defaults():
     req = AddRequest(content="hello")
     assert req.content == "hello"
     assert req.type is MemoryType.SEMANTIC
-    assert req.user is None
+    assert req.session is None
     assert req.data == {}
+    # Identity is not a client field — resolved from the authenticated principal.
+    assert not hasattr(req, "user")
 
 
-def test_chat_request_requires_message():
-    req = ChatRequest(message="hi", user="alice")
+def test_chat_request_carries_message_and_session():
+    req = ChatRequest(message="hi", session="s1")
     assert req.message == "hi"
-    assert req.user == "alice"
+    assert req.session == "s1"
+    assert not hasattr(req, "user")
 
 
 from relio.server.scope import make_scope
@@ -51,7 +54,5 @@ def test_search_returns_results_and_text(client):
     assert body["text"].startswith("- ")
 
 
-def test_search_is_scoped_by_user(client):
-    client.post("/api/memory", json={"content": "secret note", "user": "alice"})
-    resp = client.get("/api/memory/search", params={"q": "secret note", "user": "bob"})
-    assert resp.json()["results"] == []
+# NOTE: tenant/user isolation is now enforced via the auth principal, not via
+# client-supplied fields. See tests/server/test_auth.py.

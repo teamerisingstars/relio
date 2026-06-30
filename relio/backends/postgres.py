@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Iterator, Optional
+
+from ..record import MemoryRecord, MemoryType, Scope
+from .base import StorageBackend
+
+_KEY = re.compile(r"^\w+$")  # guard interpolated json paths against injection
+
+
+def _vector_literal(embedding: list[float]) -> str:
+    """pgvector text form: [a,b,c]."""
+    return "[" + ",".join(str(float(x)) for x in embedding) + "]"
+
+
+def _to_record(doc) -> MemoryRecord:
+    # psycopg returns JSONB as a parsed dict; tolerate text too.
+    if isinstance(doc, (dict, list)):
+        return MemoryRecord.model_validate(doc)
+    return MemoryRecord.model_validate_json(doc)
+
+
+class PostgresBackend(StorageBackend):
+    """Postgres + pgvector backend — behaviour-identical to SQLiteBackend.
+
+    The scale path for high write-concurrency or many millions of vectors. A
+    connection **pool** lets independent requests run concurrently (no global
+    lock). Within `transaction()`, one connection is bound to the current
+    context so nested writes share it and commit atomically.
+    """
+
+    def __init__(self, dsn: str, dim: int = 384, pool_size: int = 10) -> None:
+        from psycopg_pool import ConnectionPool  # lazy: only when Postgres is used
+
+        self.dim = dim
+        # Holds the transaction's connection for the current context (else None).
+        self._active: ContextVar[Optional[object]] = ContextVar(
+            "relio_pg_active", default=None
+        )
+        self._pool = ConnectionPool(
+            dsn, min_size=1, max_size=pool_size, kwargs={"autocommit": True}, open=True
+        )
+        self._init_schema()
+
+    @contextmanager
+    def _conn(self) -> Iterator[object]:
+        """Yield the transaction-bound connection if inside one, else a pooled one."""
+        active = self._active.get()
+        if active is not None:
+            yield active
+        else:
+            with self._pool.connection() as conn:
+                yield conn
+
+    def _init_schema(self) -> None:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS records (
+                    rid        BIGSERIAL PRIMARY KEY,
+                    id         TEXT UNIQUE NOT NULL,
+                    doc        JSONB NOT NULL,
+                    expires_at DOUBLE PRECISION,
+                    embedding  vector({self.dim})
+                )
+                """
+            )
+            # GIN index makes structured query() (Feature J) indexed on jsonb.
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_doc_gin ON records USING GIN (doc)")
+
+    @staticmethod
+    def _expires_at(record: MemoryRecord) -> float | None:
+        if record.ttl is None:
+            return None
+        return record.created_at.timestamp() + record.ttl
+
+    def add(self, record: MemoryRecord, embedding: list[float] | None) -> None:
+        doc = record.model_dump_json()
+        vec = _vector_literal(embedding) if embedding is not None else None
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO records (id, doc, expires_at, embedding)
+                VALUES (%s, %s::jsonb, %s, %s::vector)
+                ON CONFLICT (id) DO UPDATE
+                SET doc = EXCLUDED.doc,
+                    expires_at = EXCLUDED.expires_at,
+                    embedding = EXCLUDED.embedding
+                """,
+                (record.id, doc, self._expires_at(record), vec),
+            )
+
+    def get(self, record_id: str) -> MemoryRecord | None:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT doc FROM records WHERE id = %s", (record_id,))
+            row = cur.fetchone()
+        if row is None:
+            return None
+        return _to_record(row[0])
+
+    def delete(self, record_id: str) -> bool:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM records WHERE id = %s", (record_id,))
+            return cur.rowcount > 0
+
+    def all(self) -> list[MemoryRecord]:
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT doc FROM records ORDER BY rid")
+            rows = cur.fetchall()
+        return [_to_record(r[0]) for r in rows]
+
+    def search(self, embedding: list[float], k: int) -> list[tuple[MemoryRecord, float]]:
+        vec = _vector_literal(embedding)
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT doc, embedding <-> %s::vector AS distance
+                FROM records
+                WHERE embedding IS NOT NULL
+                ORDER BY distance
+                LIMIT %s
+                """,
+                (vec, k),
+            )
+            rows = cur.fetchall()
+        return [(_to_record(r[0]), float(r[1])) for r in rows]
+
+    def query(
+        self,
+        *,
+        type: Optional[MemoryType] = None,
+        scope: Optional[Scope] = None,
+        metadata: Optional[dict[str, str]] = None,
+        limit: int = 100,
+    ) -> list[MemoryRecord]:
+        clauses: list[str] = []
+        params: list[object] = []
+        if type is not None:
+            clauses.append("doc->>'type' = %s")
+            params.append(type.value)
+        if scope is not None:
+            for field in ("tenant", "user", "agent", "session"):
+                value = getattr(scope, field)
+                if value is not None:
+                    clauses.append(f"doc#>>'{{scope,{field}}}' = %s")
+                    params.append(value)
+        for key, value in (metadata or {}).items():
+            if not _KEY.match(key):
+                raise ValueError(f"invalid metadata key: {key!r}")
+            clauses.append(f"doc#>>'{{metadata,{key}}}' = %s")
+            params.append(value)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(f"SELECT doc FROM records{where} ORDER BY rid LIMIT %s", params)
+            rows = cur.fetchall()
+        return [_to_record(r[0]) for r in rows]
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        # Borrow one connection, bind it for this context so nested add()/delete()
+        # reuse it, and wrap the block in a single BEGIN/COMMIT.
+        with self._pool.connection() as conn:
+            token = self._active.set(conn)
+            try:
+                with conn.transaction():
+                    yield
+            finally:
+                self._active.reset(token)
+
+    def close(self) -> None:
+        self._pool.close()

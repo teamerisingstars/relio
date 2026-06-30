@@ -42,6 +42,22 @@ def test_caching_embedder_only_embeds_unique_text_once():
     assert cached.dim == 4
 
 
+def test_embed_batch_matches_individual_embeds():
+    emb = DeterministicEmbedder(dim=8)
+    texts = ["a", "b", "c"]
+    assert emb.embed_batch(texts) == [emb.embed(t) for t in texts]
+
+
+def test_caching_embed_batch_dedups_and_caches():
+    inner = CountingEmbedder(dim=4)
+    cached = CachingEmbedder(inner)
+    out = cached.embed_batch(["x", "x", "y"])
+    assert out[0] == out[1]          # duplicate resolves to same vector
+    assert inner.calls == 2          # only unique x, y embedded
+    cached.embed_batch(["x", "y"])   # fully cached now
+    assert inner.calls == 2          # no new inner work
+
+
 # tests/test_embedding.py  (append)
 import pytest
 
