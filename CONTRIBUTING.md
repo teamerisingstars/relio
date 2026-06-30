@@ -8,7 +8,7 @@ explains the conventions the codebase follows.
 Requires Python 3.11+.
 
 ```bash
-git clone <repo> relio && cd relio
+git clone https://github.com/teamerisingstars/relio.git && cd relio
 python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 pytest                                            # should be all green

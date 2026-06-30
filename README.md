@@ -1,5 +1,9 @@
 # Relio
 
+[![PyPI](https://img.shields.io/pypi/v/relio.svg)](https://pypi.org/project/relio/)
+[![Python](https://img.shields.io/pypi/pyversions/relio.svg)](https://pypi.org/project/relio/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **An app-first AI framework.** Build a normal FastAPI + React app with your own
 data, and *call AI in* where you need it — memory, retrieval, agents, document
 extraction, and MCP — as one in-process component, not a pile of services.
@@ -29,23 +33,27 @@ Requires **Python 3.11+** (and Node 18+ only if you scaffold a web/mobile/deskto
 client).
 
 ```bash
-pip install "relio[server]"     # engine + FastAPI server + Claude provider
+pip install "relio[server]"      # engine + FastAPI server + Claude provider
 ```
 
-Optional extras:
+Optional extras (combine, e.g. `.[server,postgres]`):
 
 | Extra | Adds |
 |-------|------|
-| `relio[local]` | local ONNX embeddings (`fastembed`) — zero-API-cost vectors |
-| `relio[mcp]` | the MCP server |
-| `relio[postgres]` | Postgres + pgvector backend (with connection pooling) |
-| `relio[server]` | FastAPI, uvicorn, Anthropic SDK |
-| `relio[dev]` | everything + pytest/coverage |
+| `local` | local ONNX embeddings (`fastembed`) — zero-API-cost vectors |
+| `mcp` | the MCP server |
+| `postgres` | Postgres + pgvector backend (with connection pooling) |
+| `server` | FastAPI, uvicorn, Anthropic SDK |
+| `dev` | everything + pytest/coverage |
 
-From source:
+> Tip: use a virtual environment (`python -m venv .venv`) so the `relio` command
+> lands on your PATH and deps stay isolated.
+
+### From source
 
 ```bash
-git clone <repo> relio && cd relio
+git clone https://github.com/teamerisingstars/relio.git
+cd relio
 pip install -e ".[dev]"
 pytest            # 150+ tests
 ```
