@@ -1,0 +1,71 @@
+:root {
+  --canvas: #faf7f2;
+  --surface: #ffffff;
+  --ink: #1b1a17;
+  --muted: #6b655c;
+  --accent: #2f6f62;
+  --accent-soft: #e7efec;
+  --line: #e9e3da;
+  --radius: 14px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", ui-sans-serif, sans-serif;
+}
+.brand {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.4rem;
+  letter-spacing: 0.2px;
+}
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 16px 24px; border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.tagline { color: var(--muted); font-size: 0.85rem; }
+.layout {
+  flex: 1; display: grid; grid-template-columns: 1fr 340px;
+  gap: 20px; padding: 20px; max-width: 1100px; width: 100%; margin: 0 auto;
+}
+.chat, .browser {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.messages { list-style: none; margin: 0; padding: 16px; flex: 1; overflow-y: auto; }
+.bubble {
+  max-width: 80%; margin: 8px 0; padding: 10px 14px;
+  border-radius: 12px; line-height: 1.45; white-space: pre-wrap;
+}
+.bubble.user { margin-left: auto; background: var(--accent); color: #fff; }
+.bubble.assistant { margin-right: auto; background: var(--accent-soft); color: var(--ink); }
+.composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+.composer input, .search input, .add input {
+  flex: 1; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 10px; font: inherit; background: var(--canvas);
+}
+button {
+  padding: 10px 16px; border: none; border-radius: 10px;
+  background: var(--accent); color: #fff; font: inherit; cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+.browser { padding: 16px; gap: 12px; }
+.browser-title { font-family: "Fraunces", serif; margin: 0; font-size: 1.1rem; }
+.search, .add { display: flex; gap: 8px; }
+.results { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; }
+.result {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.result-content { flex: 1; }
+.chip {
+  font-size: 0.7rem; color: var(--accent); background: var(--accent-soft);
+  padding: 2px 8px; border-radius: 999px;
+}
+.result button { padding: 2px 9px; background: transparent; color: var(--muted); }
+.error { color: #b4452f; margin: 0; }
