@@ -1,7 +1,8 @@
 [project]
 name = "relio"
 version = "0.1.0"
-description = "Relio Memory — unified AI memory engine"
+description = "Relio — app-first AI framework with a built-in, governed memory engine"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",
