@@ -6,6 +6,14 @@ All notable changes to Relio are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Postgres `query()` numeric operators.** `field` / `field__ne` / `field__in`
+  with numeric values failed on Postgres (`operator does not exist: text <> integer`)
+  because JSONB extracts as text; they now cast to `numeric` like the range
+  operators. `order_by` on a numeric metadata field now sorts numerically (via
+  jsonb value ordering) instead of lexicographically. SQLite was already correct;
+  the cross-backend conformance suite (now running Postgres in CI) caught the gap.
+
 ### ⚠️ Upgrade note (from 0.1.5)
 - **`extra_routers` are auth-protected by default (since 0.1.5).** If you mount a
   **public** auth router (e.g. `/auth/register|login`) via `extra_routers`, it now

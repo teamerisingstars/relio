@@ -159,6 +159,9 @@ def test_query_range_and_membership_operators(make_backend):
     _seed_query(be)
     assert {r.content for r in be.query(where={"amount__gt": 400})} == {"b", "c"}
     assert {r.content for r in be.query(where={"amount__lte": 500})} == {"a", "b"}
+    # numeric eq / ne / in must compare as numbers on both backends (Postgres
+    # extracts JSONB as text, so these need a numeric cast — regression guard).
+    assert {r.content for r in be.query(where={"amount": 500})} == {"b"}
     assert {r.content for r in be.query(where={"amount__ne": 500})} == {"a", "c"}
     assert {r.content for r in be.query(where={"amount__in": [100, 900]})} == {"a", "c"}
     assert {r.content for r in be.query(where={"name__contains": "amm"})} == {"c"}   # gamma
@@ -171,6 +174,15 @@ def test_query_order_by_and_pagination(make_backend):
     assert [r.metadata["amount"] for r in be.query(order_by="-amount")] == [900, 500, 100]
     page = be.query(order_by="amount", limit=1, offset=1)
     assert [r.metadata["amount"] for r in page] == [500]
+
+
+def test_query_order_by_sorts_numbers_numerically(make_backend):
+    # Values that sort DIFFERENTLY as text vs numbers ("100" < "20" < "9" as text).
+    be = make_backend(4)
+    for n in (9, 100, 20):
+        be.add(MemoryRecord(content=str(n), metadata={"amount": n}), None)
+    assert [r.metadata["amount"] for r in be.query(order_by="amount")] == [9, 20, 100]
+    assert [r.metadata["amount"] for r in be.query(order_by="-amount")] == [100, 20, 9]
 
 
 def test_query_filters_by_scope(make_backend):

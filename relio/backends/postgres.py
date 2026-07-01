@@ -12,6 +12,12 @@ _KEY = re.compile(r"^\w+$")  # guard interpolated json paths against injection
 _SQL_OP = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "ne": "!="}
 
 
+def _is_number(v: object) -> bool:
+    # bool is an int subclass, but JSON booleans extract to 'true'/'false' text —
+    # don't numeric-cast them.
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 def _vector_literal(embedding: list[float]) -> str:
     """pgvector text form: [a,b,c]."""
     return "[" + ",".join(str(float(x)) for x in embedding) + "]"
@@ -172,17 +178,23 @@ class PostgresBackend(StorageBackend):
                 clauses.append(f"{col} LIKE %s")
                 params.append(f"{value}%")
             elif op == "in":
+                # `#>>` yields text; cast to numeric when the values are numbers so
+                # `IN (100, 900)` matches (SQLite compares typed values natively).
                 values = list(value)
-                clauses.append(f"{col} IN ({', '.join('%s' for _ in values)})")
+                placeholders = ", ".join("%s" for _ in values)
+                lhs = f"({col})::numeric" if values and all(_is_number(v) for v in values) else col
+                clauses.append(f"{lhs} IN ({placeholders})")
                 params.extend(values)
             elif op == "ne":
-                clauses.append(f"{col} != %s")
+                lhs = f"({col})::numeric" if _is_number(value) else col
+                clauses.append(f"{lhs} != %s")
                 params.append(value)
             elif op in _SQL_OP:
                 clauses.append(f"({col})::numeric {_SQL_OP[op]} %s")
                 params.append(value)
-            else:
-                clauses.append(f"{col} = %s")
+            else:  # exact equality
+                lhs = f"({col})::numeric" if _is_number(value) else col
+                clauses.append(f"{lhs} = %s")
                 params.append(value)
         where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         order_sql = " ORDER BY rid"
@@ -191,7 +203,10 @@ class PostgresBackend(StorageBackend):
             field = order_by.lstrip("-")
             if not _KEY.match(field):
                 raise ValueError(f"invalid order_by field: {field!r}")
-            order_sql = f" ORDER BY doc#>>'{{metadata,{field}}}' {'DESC' if desc else 'ASC'}"
+            # `#>` keeps the value as jsonb so ordering is by value (numbers sort
+            # numerically, strings lexically) — matching SQLite's typed json_extract.
+            # `#>>` (text) would sort numbers lexicographically ("100" < "9").
+            order_sql = f" ORDER BY doc#>'{{metadata,{field}}}' {'DESC' if desc else 'ASC'}"
         params += [limit, offset]
         with self._conn() as conn, conn.cursor() as cur:
             cur.execute(
