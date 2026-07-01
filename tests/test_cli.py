@@ -139,3 +139,16 @@ def test_check_passes_on_a_fresh_scaffold(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path / "myapp")
     rc = main(["check"], runner=FakeRunner())
     assert rc == 0  # a fresh scaffold satisfies its own gate
+
+
+def test_ai_new_scaffolds_an_ai_app(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    main(["ai", "new", "assistant"], runner=FakeRunner())
+    app_py = tmp_path / "assistant" / "app.py"
+    assert app_py.is_file()
+    assert "AIApp" in app_py.read_text()
+    assert "relio[ai]" in (tmp_path / "assistant" / "requirements.txt").read_text()
+    # the AI-app scaffold also satisfies the governance gate
+    from relio.cli.check import check_project
+
+    assert check_project(tmp_path / "assistant") == []

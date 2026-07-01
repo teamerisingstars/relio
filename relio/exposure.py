@@ -12,6 +12,7 @@ class ToolSpec:
     fn: Callable[..., Any]
     description: str
     parameters: dict[str, str]  # param name -> type name
+    destructive: bool = False   # requires explicit confirm=True to run
 
 
 def _param_schema(fn: Callable[..., Any]) -> dict[str, str]:
@@ -43,8 +44,14 @@ class ExposureMap:
         *,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        destructive: bool = False,
     ):
-        """Register a callable as an AI-invokable tool. Usable bare or with args."""
+        """Register a callable as an AI-invokable tool. Usable bare or with args.
+
+        `destructive=True` marks a tool that mutates/deletes/spends; it then
+        requires an explicit `confirm=True` to run — a guard against a
+        prompt-injected agent triggering it.
+        """
 
         def register(f: Callable[..., Any]) -> Callable[..., Any]:
             tool_name = name or f.__name__
@@ -53,6 +60,7 @@ class ExposureMap:
                 fn=f,
                 description=description or (f.__doc__ or "").strip(),
                 parameters=_param_schema(f),
+                destructive=destructive,
             )
             return f
 
@@ -69,8 +77,13 @@ class ExposureMap:
             raise KeyError(f"no such tool: {name!r}")
         return self._tools[name]
 
-    def call(self, name: str, **kwargs: Any) -> Any:
-        return self.get(name).fn(**kwargs)
+    def call(self, name: str, *, confirm: bool = False, **kwargs: Any) -> Any:
+        spec = self.get(name)
+        if spec.destructive and not confirm:
+            raise PermissionError(
+                f"tool {name!r} is destructive; call with confirm=True to run it"
+            )
+        return spec.fn(**kwargs)
 
     @staticmethod
     def project(obj: Any, fields: list[str]) -> dict[str, Any]:

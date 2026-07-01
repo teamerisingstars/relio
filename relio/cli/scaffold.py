@@ -225,6 +225,53 @@ _CLAUDE_SETTINGS = """\
 """
 
 
+_AI_APP_PY = '''\
+from relio.aiapp import AIApp
+from relio.server.llm.claude import ClaudeProvider
+
+# An AI-first app: a bounded "assistant" agent with its own memory, served over
+# HTTP. The chat LLM uses ANTHROPIC_API_KEY.
+ai_app = AIApp(provider=ClaudeProvider())
+ai_app.agent("assistant", system="You are a helpful assistant.")
+app = ai_app.build()   # /api/chat, /api/agents/{name}/chat, /api/memory, /api/graph
+'''
+
+_AI_README = """\
+# {name}
+
+An AI-first application built with [Relio](https://github.com/teamerisingstars/relio)
+using the `AIApp` framework — a bounded agent with its own memory, served over HTTP.
+
+## Run
+```
+pip install -r requirements.txt
+export ANTHROPIC_API_KEY=sk-...
+uvicorn app:app --reload
+```
+
+Endpoints: `GET /api/agents`, `POST /api/agents/assistant/chat` (SSE),
+`POST /api/chat`, `/api/memory`, `/api/graph`.
+
+## Develop
+- `relio develop "<what to build>"` — build features with Claude Code.
+- `relio test` — run tests.  `relio check` — every module needs a test + doc.
+"""
+
+
+def write_ai_scaffold(target: str, name: Optional[str] = None) -> Path:
+    """Scaffold an AI-first app: an `AIApp` with a starter agent + dev harness."""
+    root = Path(target)
+    name = name or root.name
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "app.py").write_text(_AI_APP_PY)
+    (root / "Dockerfile").write_text(_DOCKERFILE)
+    (root / "requirements.txt").write_text("relio[ai]\n")
+    (root / ".gitignore").write_text(_GITIGNORE)
+    (root / "README.md").write_text(_AI_README.format(name=name))
+    _write_dev_harness(root, name)
+    return root
+
+
 def _write_dev_harness(root: Path, name: str) -> None:
     """Instructions + docs + tests + the Claude Code gate hook, so a fresh app
     already satisfies `relio check` and is ready for agentic development."""

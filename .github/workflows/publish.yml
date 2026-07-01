@@ -6,6 +6,7 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
+  workflow_dispatch: {}   # manual "Run workflow" button (Actions tab) for testing
 
 jobs:
   build:

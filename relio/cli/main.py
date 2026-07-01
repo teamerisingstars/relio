@@ -58,6 +58,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("check", help="fail if any module lacks a test or a doc")
     check.add_argument("--path", default=".", help="project root to check (default: .)")
+
+    ai = sub.add_parser("ai", help="AI-application framework (AIApp) commands")
+    ai_sub = ai.add_subparsers(dest="ai_command", required=True)
+    ai_new = ai_sub.add_parser("new", help="scaffold an AI-first app (agent + memory)")
+    ai_new.add_argument("name")
     return parser
 
 
@@ -158,8 +163,18 @@ def cmd_check(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
     return 0
 
 
+def cmd_ai(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
+    if args.ai_command == "new":
+        from .scaffold import write_ai_scaffold
+
+        write_ai_scaffold(args.name, args.name)
+        return 0
+    return 1
+
+
 _HANDLERS: dict[str, Callable[[argparse.Namespace, Runner, Spawn], int]] = {
     "new": cmd_new,
+    "ai": cmd_ai,
     "dev": cmd_dev,
     "build": cmd_build,
     "serve": cmd_serve,

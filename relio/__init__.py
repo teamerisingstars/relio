@@ -1,4 +1,5 @@
 from .ai import RelioAI
+from .aiapp import AIApp
 from .memory import Memory
 from .record import MemoryRecord, MemoryType, Relation, Scope
 from .interchange import (
@@ -11,6 +12,7 @@ from .mcp_server import build_mcp_server
 
 __all__ = [
     "RelioAI",
+    "AIApp",
     "Memory",
     "MemoryRecord",
     "MemoryType",

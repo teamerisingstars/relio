@@ -50,3 +50,19 @@ def test_provider_without_extract_raises(tmp_path):
     with pytest.raises(NotImplementedError):
         ai.extract("text", schema=BOM_SCHEMA)
     ai.close()
+
+
+def test_validate_extraction_enforces_required_fields():
+    from relio.ai import validate_extraction
+
+    with pytest.raises(ValueError):
+        validate_extraction({"part_no": "AB-1"}, {"required": ["part_no", "qty"]})
+    assert validate_extraction({"part_no": "AB-1"}, {"required": ["part_no"]}) == {"part_no": "AB-1"}
+
+
+def test_extract_with_validate_rejects_bad_output(tmp_path):
+    # The fake returns a debug dict without the required fields — validate catches it.
+    ai = _ai(tmp_path, provider=FakeProvider())
+    with pytest.raises(ValueError):
+        ai.extract("text", schema={"required": ["part_no"]}, validate=True)
+    ai.close()

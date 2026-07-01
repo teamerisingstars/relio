@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+
+logger = logging.getLogger("relio")
 
 from ...memory import Memory
 from ...record import Scope
@@ -36,8 +39,9 @@ def build_chat_router(
                 ):
                     yield f"data: {json.dumps({'delta': chunk})}\n\n"
                 yield f"data: {json.dumps({'done': True})}\n\n"
-            except Exception as exc:  # surface LLM errors as an SSE event, end the stream
-                yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            except Exception:  # log server-side; never leak internals to the client
+                logger.exception("chat stream failed")
+                yield f"data: {json.dumps({'error': 'internal error'})}\n\n"
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -48,10 +48,10 @@ class Agent:
         names = self.ai.tools.names()
         return names if self._allowed is None else [n for n in names if n in self._allowed]
 
-    def call_tool(self, name: str, **kwargs: Any) -> Any:
+    def call_tool(self, name: str, *, confirm: bool = False, **kwargs: Any) -> Any:
         if self._allowed is not None and name not in self._allowed:
             raise PermissionError(f"agent {self.name!r} may not call tool {name!r}")
-        return self.ai.call_tool(name, **kwargs)
+        return self.ai.call_tool(name, confirm=confirm, **kwargs)
 
     # --- reasoning (scoped to this agent) -----------------------------------
 

@@ -1,0 +1,64 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b0c10"/>
+      <stop offset="1" stop-color="#14161c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6c8cff"/>
+      <stop offset="1" stop-color="#9a7cff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="6" fill="url(#accent)"/>
+
+  <!-- node / memory-graph motif, right side -->
+  <g opacity="0.9" stroke="#6c8cff" stroke-width="2.5" fill="#14161c">
+    <line x1="980" y1="180" x2="1090" y2="120" stroke="#2a3350"/>
+    <line x1="980" y1="180" x2="1080" y2="290" stroke="#2a3350"/>
+    <line x1="980" y1="180" x2="900" y2="300" stroke="#2a3350"/>
+    <line x1="1080" y1="290" x2="1150" y2="410" stroke="#2a3350"/>
+    <line x1="900" y1="300" x2="980" y2="440" stroke="#2a3350"/>
+    <circle cx="980" cy="180" r="26" fill="url(#accent)" stroke="none"/>
+    <circle cx="1090" cy="120" r="16"/>
+    <circle cx="1080" cy="290" r="18"/>
+    <circle cx="900" cy="300" r="16"/>
+    <circle cx="1150" cy="410" r="14"/>
+    <circle cx="980" cy="440" r="18"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="96" y="250" font-size="128" font-weight="800" fill="#e8eaf0" letter-spacing="-2">Relio</text>
+
+  <!-- tagline -->
+  <text x="100" y="320" font-size="34" font-weight="600" fill="#c7cede">App-first AI framework</text>
+  <text x="100" y="366" font-size="28" fill="#9aa3b2">with a built-in, governed memory engine</text>
+
+  <!-- feature chips -->
+  <g font-size="22" font-weight="600">
+    <g>
+      <rect x="100" y="430" width="130" height="48" rx="24" fill="#1d2129" stroke="#2a3350"/>
+      <text x="165" y="461" fill="#c7cede" text-anchor="middle">memory</text>
+    </g>
+    <g>
+      <rect x="246" y="430" width="120" height="48" rx="24" fill="#1d2129" stroke="#2a3350"/>
+      <text x="306" y="461" fill="#c7cede" text-anchor="middle">agents</text>
+    </g>
+    <g>
+      <rect x="382" y="430" width="96" height="48" rx="24" fill="#1d2129" stroke="#2a3350"/>
+      <text x="430" y="461" fill="#c7cede" text-anchor="middle">RAG</text>
+    </g>
+    <g>
+      <rect x="494" y="430" width="96" height="48" rx="24" fill="#1d2129" stroke="#2a3350"/>
+      <text x="542" y="461" fill="#c7cede" text-anchor="middle">MCP</text>
+    </g>
+    <g>
+      <rect x="606" y="430" width="110" height="48" rx="24" fill="#1d2129" stroke="#2a3350"/>
+      <text x="661" y="461" fill="#c7cede" text-anchor="middle">SDKs</text>
+    </g>
+  </g>
+
+  <!-- install -->
+  <text x="100" y="556" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="26" fill="#6c8cff">$ pip install "relio[server]"</text>
+</svg>

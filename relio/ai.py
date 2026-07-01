@@ -9,6 +9,18 @@ from .memory import Memory
 from .record import MemoryRecord, MemoryType, Relation, Scope
 
 
+def validate_extraction(data: dict, schema: Optional[dict]) -> dict:
+    """Ensure model-extracted `data` has the schema's `required` fields.
+
+    A minimal, dependency-free guard — extraction output is untrusted, so validate
+    before feeding it to business logic."""
+    required = (schema or {}).get("required", [])
+    missing = [k for k in required if k not in data]
+    if missing:
+        raise ValueError(f"extraction missing required fields: {missing}")
+    return data
+
+
 class RelioAI:
     """The called-in AI component: one seam composing the AI-system components
     (memory/RAG, embeddings, graph, structured query, reasoning, MCP interop).
@@ -110,28 +122,44 @@ class RelioAI:
         if self.provider is None:
             raise RuntimeError(f"RelioAI.{what} needs an LLM provider")
 
-    def extract(self, text: str, schema: Optional[dict] = None) -> dict:
-        """Extract structured data from text into `schema`."""
+    def extract(self, text: str, schema: Optional[dict] = None, validate: bool = False) -> dict:
+        """Extract structured data from text into `schema`.
+
+        Model output is untrusted — pass `validate=True` to enforce the schema's
+        `required` fields before you use the result.
+        """
         self._require_provider("extract")
-        return self.provider.extract(text, schema=schema)
+        result = self.provider.extract(text, schema=schema)
+        return validate_extraction(result, schema) if validate else result
 
     def extract_file(
         self,
         file: Union[str, Path, bytes, bytearray],
         schema: Optional[dict] = None,
         media_type: str = "application/pdf",
+        validate: bool = False,
     ) -> dict:
         """Extract structured data from a file (PDF/image) into `schema` — the
         path for "read this drawing/scan and give me a bill"."""
         self._require_provider("extract_file")
         data = bytes(file) if isinstance(file, (bytes, bytearray)) else Path(file).read_bytes()
-        return self.provider.extract("", schema=schema, image_bytes=data, media_type=media_type)
+        result = self.provider.extract(
+            "", schema=schema, image_bytes=data, media_type=media_type
+        )
+        return validate_extraction(result, schema) if validate else result
 
     # --- tools / exposure map (D3) ------------------------------------------
 
-    def tool(self, fn=None, *, name: Optional[str] = None, description: Optional[str] = None):
+    def tool(
+        self,
+        fn=None,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        destructive: bool = False,
+    ):
         """Register an app operation the AI may call (decorator)."""
-        return self.tools.tool(fn, name=name, description=description)
+        return self.tools.tool(fn, name=name, description=description, destructive=destructive)
 
     def expose(self, obj: Any, fields: list[str]) -> dict[str, Any]:
         """Field allowlist: project `obj` to only `fields` for AI consumption."""
@@ -139,12 +167,17 @@ class RelioAI:
 
     def list_tools(self) -> list[dict[str, Any]]:
         return [
-            {"name": s.name, "description": s.description, "parameters": s.parameters}
+            {
+                "name": s.name,
+                "description": s.description,
+                "parameters": s.parameters,
+                "destructive": s.destructive,
+            }
             for s in self.tools.list()
         ]
 
-    def call_tool(self, name: str, **kwargs: Any) -> Any:
-        return self.tools.call(name, **kwargs)
+    def call_tool(self, name: str, *, confirm: bool = False, **kwargs: Any) -> Any:
+        return self.tools.call(name, confirm=confirm, **kwargs)
 
     # --- agents (D4) ---------------------------------------------------------
 
