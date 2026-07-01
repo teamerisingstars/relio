@@ -4,6 +4,48 @@ All notable changes to Relio are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-07-01
+
+### Added
+- **User accounts** — `relio.accounts` (`pip install "relio[accounts]"`): a user
+  store (in-memory + SQLite), password login (stdlib PBKDF2), and **Google
+  OAuth**. Login issues a JWT that the existing `JWTAuth` hook verifies —
+  `build_accounts_router(store, secret, google=...)` adds
+  `/auth/register|login|google`.
+- **Multiple LLM providers, not just Claude** — `OpenAIProvider` (and any
+  OpenAI-compatible endpoint via `base_url`: Groq / Together / Ollama / local)
+  and `GeminiProvider`, alongside `ClaudeProvider`. New extras: `openai`,
+  `gemini`.
+- **`make_provider(name)` registry** — choose the AI by name
+  (`claude`/`openai`/`gemini`/`fake`) via `RELIO_PROVIDER` / `Settings.provider`,
+  and **disable the LLM explicitly with `"none"`** — the intentional way to run
+  without a provider (rather than omitting the argument).
+
+### Fixed
+- `relio dev` / `relio build` now target the scaffolded app's `web/` directory
+  (they previously ran `npm --prefix frontend`, which doesn't exist in a
+  scaffolded app).
+- `create_app(..., frontend_dir=…)` serves the API only (with a warning) when the
+  frontend hasn't been built yet, instead of raising `FileNotFoundError` — so
+  `uvicorn app:app` works before `relio build`.
+- The SPA catch-all now returns a real **404** for unknown `/api/*` paths instead
+  of serving `index.html`, so missing/typo'd API routes fail loudly.
+- **Providers construct lazily** — `ClaudeProvider()` / `OpenAIProvider()` /
+  `GeminiProvider()` no longer create their SDK client (or require an API key) at
+  construction; the client is built on first use. The app boots without a key.
+- `relio check` now matches module names as **whole words** (case-insensitive)
+  instead of any substring, so a module isn't counted as tested/documented just
+  because its stem appears inside another word.
+- **`Depends(JWTAuth(...))` / `Depends(ApiKeyAuth(...))` now enforce auth.**
+  `auth.py` no longer uses stringized annotations, which had made an AuthHook
+  *instance* unusable as a FastAPI dependency (`request` was treated as a query
+  param → 422, auth silently skipped).
+- **`create_app(..., extra_routers=[...])`** — app routers are registered before
+  the SPA catch-all, so a mounted frontend no longer shadows your routes.
+- **Scaffold files are written UTF-8.** Generated `tests/test_app.py` (which
+  contains an em-dash) previously wrote as cp1252 on Windows, producing a
+  `SyntaxError: Non-UTF-8 code` that broke the app's pytest + `relio check`.
+
 ## [0.1.3] - 2026-07-01
 
 ### Fixed
@@ -79,6 +121,7 @@ engine.
   (+ coverage), and `relio check` (a governance gate requiring a test and a doc
   for every module, Python and TypeScript).
 
+[0.1.4]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.4
 [0.1.3]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.3
 [0.1.2]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.2
 [0.1.1]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.1

@@ -44,8 +44,20 @@ def test_asset_is_served(tmp_path):
     memory.close()
 
 
-def test_missing_frontend_dir_raises(tmp_path):
+def test_unknown_api_route_is_404_not_spa(tmp_path):
+    # A missing /api/* path must be a real 404, not the SPA index.html.
+    client, memory = _client(tmp_path)
+    resp = client.get("/api/does-not-exist")
+    assert resp.status_code == 404
+    assert "INDEX" not in resp.text
+    memory.close()
+
+
+def test_missing_frontend_dir_serves_api_only(tmp_path):
+    # Frontend not built yet — the app should still start and serve the API,
+    # not raise (regression: relio-framework-feedback).
     memory = Memory(path=str(tmp_path / "s.db"), embedder=DeterministicEmbedder(dim=16))
-    with pytest.raises(FileNotFoundError):
-        create_app(memory, FakeProvider(), frontend_dir=str(tmp_path / "nope"))
+    app = create_app(memory, FakeProvider(), frontend_dir=str(tmp_path / "nope"))
+    client = TestClient(app)
+    assert client.get("/api/health").json() == {"status": "ok"}
     memory.close()

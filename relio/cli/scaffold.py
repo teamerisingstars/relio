@@ -263,11 +263,11 @@ def write_ai_scaffold(target: str, name: Optional[str] = None) -> Path:
     root = Path(target)
     name = name or root.name
     root.mkdir(parents=True, exist_ok=True)
-    (root / "app.py").write_text(_AI_APP_PY)
-    (root / "Dockerfile").write_text(_DOCKERFILE)
-    (root / "requirements.txt").write_text("relio[ai]\n")
-    (root / ".gitignore").write_text(_GITIGNORE)
-    (root / "README.md").write_text(_AI_README.format(name=name))
+    (root / "app.py").write_text(_AI_APP_PY, encoding="utf-8")
+    (root / "Dockerfile").write_text(_DOCKERFILE, encoding="utf-8")
+    (root / "requirements.txt").write_text("relio[ai]\n", encoding="utf-8")
+    (root / ".gitignore").write_text(_GITIGNORE, encoding="utf-8")
+    (root / "README.md").write_text(_AI_README.format(name=name), encoding="utf-8")
     _write_dev_harness(root, name)
     return root
 
@@ -278,11 +278,11 @@ def _write_dev_harness(root: Path, name: str) -> None:
     (root / "docs").mkdir(parents=True, exist_ok=True)
     (root / "tests").mkdir(parents=True, exist_ok=True)
     (root / ".claude").mkdir(parents=True, exist_ok=True)
-    (root / "CLAUDE.md").write_text(_CLAUDE_MD.format(name=name))
-    (root / "docs" / "README.md").write_text(_DOCS_README.format(name=name))
-    (root / "docs" / "app.md").write_text(_DOCS_APP)
-    (root / "tests" / "test_app.py").write_text(_TEST_APP)
-    (root / ".claude" / "settings.json").write_text(_CLAUDE_SETTINGS)
+    (root / "CLAUDE.md").write_text(_CLAUDE_MD.format(name=name), encoding="utf-8")
+    (root / "docs" / "README.md").write_text(_DOCS_README.format(name=name), encoding="utf-8")
+    (root / "docs" / "app.md").write_text(_DOCS_APP, encoding="utf-8")
+    (root / "tests" / "test_app.py").write_text(_TEST_APP, encoding="utf-8")
+    (root / ".claude" / "settings.json").write_text(_CLAUDE_SETTINGS, encoding="utf-8")
 
 
 def write_scaffold(
@@ -307,12 +307,12 @@ def write_scaffold(
     if web:
         return _write_web_scaffold(root, name)
     (root / "web").mkdir(parents=True, exist_ok=True)
-    (root / "app.py").write_text(_APP_PY)
-    (root / "web" / "index.html").write_text(_INDEX_HTML.format(name=name))
-    (root / "Dockerfile").write_text(_DOCKERFILE)
-    (root / "requirements.txt").write_text(_REQUIREMENTS)
-    (root / ".gitignore").write_text(_GITIGNORE)
-    (root / "README.md").write_text(_README.format(name=name))
+    (root / "app.py").write_text(_APP_PY, encoding="utf-8")
+    (root / "web" / "index.html").write_text(_INDEX_HTML.format(name=name), encoding="utf-8")
+    (root / "Dockerfile").write_text(_DOCKERFILE, encoding="utf-8")
+    (root / "requirements.txt").write_text(_REQUIREMENTS, encoding="utf-8")
+    (root / ".gitignore").write_text(_GITIGNORE, encoding="utf-8")
+    (root / "README.md").write_text(_README.format(name=name), encoding="utf-8")
     _write_dev_harness(root, name)
     return root
 
@@ -323,8 +323,8 @@ def _write_ts_sdk(sdk_dir: Path) -> None:
 
     schema = app_schema()
     sdk_dir.mkdir(parents=True, exist_ok=True)
-    (sdk_dir / "types.ts").write_text(generate_ts_types(schema))
-    (sdk_dir / "client.ts").write_text(generate_ts_client(schema))
+    (sdk_dir / "types.ts").write_text(generate_ts_types(schema), encoding="utf-8")
+    (sdk_dir / "client.ts").write_text(generate_ts_client(schema), encoding="utf-8")
 
 
 def _write_web_scaffold(root: Path, name: str) -> Path:
@@ -332,11 +332,11 @@ def _write_web_scaffold(root: Path, name: str) -> Path:
     shutil.copytree(_TEMPLATES / "web", root / "web", dirs_exist_ok=True)
     _write_ts_sdk(root / "web" / "src" / "sdk")
 
-    (root / "app.py").write_text(_WEB_APP_PY)
-    (root / "Dockerfile").write_text(_WEB_DOCKERFILE)
-    (root / "requirements.txt").write_text(_REQUIREMENTS)
-    (root / ".gitignore").write_text(_WEB_GITIGNORE)
-    (root / "README.md").write_text(_WEB_README.format(name=name))
+    (root / "app.py").write_text(_WEB_APP_PY, encoding="utf-8")
+    (root / "Dockerfile").write_text(_WEB_DOCKERFILE, encoding="utf-8")
+    (root / "requirements.txt").write_text(_REQUIREMENTS, encoding="utf-8")
+    (root / ".gitignore").write_text(_WEB_GITIGNORE, encoding="utf-8")
+    (root / "README.md").write_text(_WEB_README.format(name=name), encoding="utf-8")
     _write_dev_harness(root, name)
     _write_component_tests_and_docs(root)
     return root
@@ -355,15 +355,15 @@ def _write_component_tests_and_docs(root: Path) -> None:
         (comp.parent / f"{stem}.test.tsx").write_text(
             f"// presence test for {stem} — expand with real coverage.\n"
             f"test('{stem} present', () => {{ expect(true).toBe(true); }});\n"
-        )
-        (root / "docs" / f"{stem}.md").write_text(f"# {stem}\n\nReact component.\n")
+        , encoding="utf-8")
+        (root / "docs" / f"{stem}.md").write_text(f"# {stem}\n\nReact component.\n", encoding="utf-8")
 
 
 def _write_mobile_scaffold(root: Path, name: str) -> Path:
     # A thin Expo client; the SDK lives at src/sdk and talks to a Relio backend.
     shutil.copytree(_TEMPLATES / "mobile", root, dirs_exist_ok=True)
     _write_ts_sdk(root / "src" / "sdk")
-    (root / ".gitignore").write_text("node_modules/\n.expo/\ndist/\n")
+    (root / ".gitignore").write_text("node_modules/\n.expo/\ndist/\n", encoding="utf-8")
     return root
 
 
@@ -373,5 +373,5 @@ def _write_desktop_scaffold(root: Path, name: str) -> Path:
     shutil.copytree(_TEMPLATES / "web", root, dirs_exist_ok=True)
     shutil.copytree(_TEMPLATES / "desktop", root, dirs_exist_ok=True)
     _write_ts_sdk(root / "src" / "sdk")
-    (root / ".gitignore").write_text("node_modules/\ndist/\nsrc-tauri/target/\n")
+    (root / ".gitignore").write_text("node_modules/\ndist/\nsrc-tauri/target/\n", encoding="utf-8")
     return root

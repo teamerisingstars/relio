@@ -37,6 +37,24 @@ def test_init_and_excluded_dirs_are_ignored(tmp_path):
     assert check_project(tmp_path) == []
 
 
+def test_substring_only_match_is_not_counted_as_tested(tmp_path):
+    # Tightened gate: whole-word match. "scary" contains "car" as a substring
+    # but does not reference the `car` module, so it must still be flagged.
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "car.py").write_text("x = 1\n")
+    (tmp_path / "tests" / "test_misc.py").write_text("# a scary edge case\n")
+    (tmp_path / "docs" / "misc.md").write_text("# scary things\n")
+    missing = {(v.path, v.missing) for v in check_project(tmp_path)}
+    assert ("car.py", "test") in missing
+    assert ("car.py", "doc") in missing
+
+    # a real whole-word reference satisfies it
+    (tmp_path / "tests" / "test_car.py").write_text("import car  # references car\n")
+    (tmp_path / "docs" / "car.md").write_text("# car\n")
+    assert check_project(tmp_path) == []
+
+
 def test_typescript_component_is_gated(tmp_path):
     _clean_project(tmp_path)
     web = tmp_path / "web" / "src"

@@ -83,13 +83,13 @@ def cmd_dev(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
     # when the dev server exits.
     backend = spawner(["uvicorn", "app:app", "--reload"])
     try:
-        return runner(["npm", "--prefix", "frontend", "run", "dev"])
+        return runner(["npm", "--prefix", "web", "run", "dev"])
     finally:
         backend.terminate()
 
 
 def cmd_build(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    return runner(["npm", "--prefix", "frontend", "run", "build"])
+    return runner(["npm", "--prefix", "web", "run", "build"])
 
 
 def cmd_serve(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:

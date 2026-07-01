@@ -41,7 +41,8 @@ def test_parser_recognizes_subcommands():
 def test_build_runs_npm():
     runner = FakeRunner()
     assert main(["build"], runner=runner) == 0
-    assert runner.calls == [["npm", "--prefix", "frontend", "run", "build"]]
+    # targets the scaffolded app's web/ dir, not the framework's frontend/
+    assert runner.calls == [["npm", "--prefix", "web", "run", "build"]]
 
 
 def test_serve_runs_uvicorn_on_the_port():
@@ -63,7 +64,7 @@ def test_dev_starts_backend_and_frontend_then_stops_backend():
     spawner = FakeSpawn()
     main(["dev"], runner=runner, spawner=spawner)
     assert spawner.calls == [["uvicorn", "app:app", "--reload"]]
-    assert runner.calls == [["npm", "--prefix", "frontend", "run", "dev"]]
+    assert runner.calls == [["npm", "--prefix", "web", "run", "dev"]]
     assert spawner.proc.terminated is True
 
 
