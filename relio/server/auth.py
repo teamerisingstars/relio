@@ -1,10 +1,14 @@
-from __future__ import annotations
-
 import hashlib
 import time as _time
 from typing import Any, Callable, Optional, Sequence
 
 from fastapi import HTTPException, Request
+
+# NOTE: this module deliberately does NOT use `from __future__ import annotations`.
+# With stringized annotations, `request: Request` on an AuthHook *instance* can't
+# be resolved by FastAPI (an instance has no `__globals__`), so `Depends(auth)`
+# would treat `request` as a query param and silently stop enforcing auth. Real
+# annotations let `Depends(JWTAuth(...))` / `Depends(ApiKeyAuth(...))` work directly.
 
 from ..record import Scope
 from .scope import make_scope

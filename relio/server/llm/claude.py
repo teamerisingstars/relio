@@ -10,11 +10,14 @@ class ClaudeProvider(LLMProvider):
 
     def __init__(self, model: str = "claude-opus-4-8", client: Optional[object] = None) -> None:
         self._model = model
-        if client is None:
+        self._client = client  # created lazily on first use — no API key needed at boot
+
+    def _get_client(self):
+        if self._client is None:
             import anthropic
 
-            client = anthropic.Anthropic()
-        self._client = client
+            self._client = anthropic.Anthropic()
+        return self._client
 
     def stream(self, messages: list[Message], system: str) -> Iterator[str]:
         wire = [
@@ -22,7 +25,7 @@ class ClaudeProvider(LLMProvider):
             for m in messages
             if m.role != "system"
         ]
-        with self._client.messages.stream(
+        with self._get_client().messages.stream(
             model=self._model,
             max_tokens=4096,
             system=system,
@@ -47,7 +50,7 @@ class ClaudeProvider(LLMProvider):
         system = "Return ONLY valid JSON matching the requested schema, no prose."
         if schema:
             system += " JSON schema: " + json.dumps(schema)
-        msg = self._client.messages.create(
+        msg = self._get_client().messages.create(
             model=self._model,
             max_tokens=2048,
             system=system,

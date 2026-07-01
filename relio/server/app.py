@@ -25,6 +25,7 @@ def create_app(
     frontend_dir: Optional[str] = None,
     auth: AuthHook = anonymous_auth,
     *,
+    extra_routers: Optional[Sequence[object]] = None,
     rate_limit: Optional[tuple[int, float]] = None,
     max_body_bytes: Optional[int] = None,
     cors_origins: Optional[Sequence[str]] = None,
@@ -42,6 +43,11 @@ def create_app(
     # The LLM is optional: chat only exists when a provider is supplied.
     if provider is not None:
         app.include_router(build_chat_router(memory, provider, settings, auth))
+    # App routers must register BEFORE the SPA catch-all (mounted last), or the
+    # frontend would shadow them.
+    for router in extra_routers or []:
+        app.include_router(router)
+
     app.state.relio_memory = memory
     app.state.relio_provider = provider
     app.state.relio_settings = settings

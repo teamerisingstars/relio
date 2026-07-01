@@ -1,6 +1,7 @@
 # relio/cli/check.py
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,8 +90,14 @@ def check_project(root: str | Path) -> list[Violation]:
     for src in _iter_sources(root):
         stem = src.stem
         rel = src.relative_to(root).as_posix()
-        if stem not in tests:
+        if not _references(tests, stem):
             violations.append(Violation(rel, "test"))
-        if stem not in docs:
+        if not _references(docs, stem):
             violations.append(Violation(rel, "doc"))
     return violations
+
+
+def _references(corpus: str, stem: str) -> bool:
+    """True if `stem` appears as a whole word (case-insensitive) — not a mere
+    substring, so `car.py` isn't counted as tested just because "scary" appears."""
+    return re.search(rf"\b{re.escape(stem)}\b", corpus, re.IGNORECASE) is not None
