@@ -4,6 +4,14 @@ All notable changes to Relio are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-07-01
+
+### Fixed
+- Web scaffold: align `react-dom` and `@types/react` / `@types/react-dom` to
+  React 19. A Dependabot bump had upgraded `react` to 19 while leaving these on
+  18, which broke `npm install` in scaffolded web apps. Added a regression test
+  that fails on a react/react-dom major mismatch. ([#10](https://github.com/teamerisingstars/relio/issues/10))
+
 ## [0.1.2] - 2026-07-01
 
 ### Added
@@ -71,6 +79,7 @@ engine.
   (+ coverage), and `relio check` (a governance gate requiring a test and a doc
   for every module, Python and TypeScript).
 
+[0.1.3]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.3
 [0.1.2]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.2
 [0.1.1]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.1
 [0.1.0]: https://github.com/teamerisingstars/relio/releases/tag/v0.1.0

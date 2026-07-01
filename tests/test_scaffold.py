@@ -60,6 +60,29 @@ def test_web_scaffold_creates_react_app_with_generated_sdk(tmp_path):
     assert "node:" in df and "npm run build" in df
 
 
+def test_web_template_react_versions_are_aligned():
+    # Regression guard for #10: a Dependabot bump left react on 19 while
+    # react-dom / @types stayed on 18, breaking `npm install`. react and
+    # react-dom must share a major version.
+    import json
+    import re
+    from pathlib import Path
+
+    import relio
+
+    pkg = json.loads(
+        (Path(relio.__file__).parent / "templates" / "web" / "package.json").read_text()
+    )
+
+    def major(spec: str) -> str:
+        return re.search(r"\d+", spec).group(0)
+
+    react = pkg["dependencies"]["react"]
+    assert major(pkg["dependencies"]["react-dom"]) == major(react)
+    assert major(pkg["devDependencies"]["@types/react"]) == major(react)
+    assert major(pkg["devDependencies"]["@types/react-dom"]) == major(react)
+
+
 def test_mobile_scaffold_creates_expo_app_with_sdk(tmp_path):
     root = write_scaffold(str(tmp_path / "m"), "m", mobile=True)
     assert (root / "App.tsx").is_file()
