@@ -6,6 +6,10 @@ All notable changes to Relio are documented here. The format is based on
 
 ## [Unreleased]
 
+_Next cycle — nothing yet._
+
+## [0.1.6] - 2026-07-01
+
 ### Fixed
 - **Postgres `query()` numeric operators.** `field` / `field__ne` / `field__in`
   with numeric values failed on Postgres (`operator does not exist: text <> integer`)
