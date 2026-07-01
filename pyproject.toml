@@ -1,6 +1,6 @@
 [project]
 name = "relio"
-version = "0.1.2"
+version = "0.1.3"
 description = "Relio — app-first AI framework with a built-in, governed memory engine"
 readme = "README.md"
 requires-python = ">=3.11"

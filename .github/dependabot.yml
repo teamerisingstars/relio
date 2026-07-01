@@ -12,3 +12,12 @@ updates:
     directory: "/relio/templates/web"
     schedule:
       interval: "weekly"
+    groups:
+      # Keep React and its type packages in one PR so their major versions can
+      # never be bumped out of sync (see #10).
+      react:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "@types/react"
+          - "@types/react-dom"
