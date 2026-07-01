@@ -30,7 +30,7 @@ jobs:
     env:
       RELIO_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/relio_test
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
