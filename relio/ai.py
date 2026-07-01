@@ -55,6 +55,17 @@ class RelioAI:
     ) -> MemoryRecord:
         return self.memory.add(content, type=type, scope=scope, **kwargs)
 
+    def remember_many(
+        self,
+        items: list[Union[str, dict]],
+        type: MemoryType = MemoryType.SEMANTIC,
+        scope: Optional[Scope] = None,
+        embed: bool = True,
+    ) -> list[MemoryRecord]:
+        """Bulk-remember: each item is a string or a `{"content", "metadata", ...}`
+        mapping — for ingesting rows with metadata in one atomic, batched call."""
+        return self.memory.add_many(items, type=type, scope=scope, embed=embed)
+
     def recall(
         self, query: str, scope: Optional[Scope] = None, limit: int = 5
     ) -> list[MemoryRecord]:
@@ -91,10 +102,14 @@ class RelioAI:
         self,
         type: Optional[MemoryType] = None,
         scope: Optional[Scope] = None,
-        where: Optional[dict[str, str]] = None,
+        where: Optional[dict] = None,
+        order_by: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[MemoryRecord]:
-        return self.memory.query(type=type, scope=scope, where=where, limit=limit)
+        return self.memory.query(
+            type=type, scope=scope, where=where, order_by=order_by, limit=limit, offset=offset
+        )
 
     def transaction(self):
         return self.memory.transaction()
@@ -118,9 +133,22 @@ class RelioAI:
 
     # --- structured / multimodal extraction (D6) ----------------------------
 
-    def _require_provider(self, what: str) -> None:
+    def supports(self, capability: str) -> bool:
+        """Pre-flight for app/UI: is a provider present *and* does it support this
+        capability (`"extract"` / `"complete_with_tools"` / `"transcribe"`)?"""
+        return self.provider is not None and self.provider.supports(capability)
+
+    def _require_provider(self, what: str, capability: Optional[str] = None) -> None:
         if self.provider is None:
             raise RuntimeError(f"RelioAI.{what} needs an LLM provider")
+        if capability is not None and not self.provider.supports(capability):
+            from .server.llm.base import CapabilityError
+
+            name = type(self.provider).__name__
+            raise CapabilityError(
+                f"the {name} provider does not support {capability!r} "
+                f"(needed by RelioAI.{what})"
+            )
 
     def extract(self, text: str, schema: Optional[dict] = None, validate: bool = False) -> dict:
         """Extract structured data from text into `schema`.
@@ -128,7 +156,7 @@ class RelioAI:
         Model output is untrusted — pass `validate=True` to enforce the schema's
         `required` fields before you use the result.
         """
-        self._require_provider("extract")
+        self._require_provider("extract", "extract")
         result = self.provider.extract(text, schema=schema)
         return validate_extraction(result, schema) if validate else result
 
@@ -141,12 +169,26 @@ class RelioAI:
     ) -> dict:
         """Extract structured data from a file (PDF/image) into `schema` — the
         path for "read this drawing/scan and give me a bill"."""
-        self._require_provider("extract_file")
+        self._require_provider("extract_file", "extract")
         data = bytes(file) if isinstance(file, (bytes, bytearray)) else Path(file).read_bytes()
         result = self.provider.extract(
             "", schema=schema, image_bytes=data, media_type=media_type
         )
         return validate_extraction(result, schema) if validate else result
+
+    def transcribe(
+        self,
+        audio: Union[str, Path, bytes, bytearray],
+        *,
+        media_type: str = "audio/webm",
+        language: Optional[str] = None,
+    ) -> str:
+        """Speech-to-text: turn a voice clip into text (server-side STT). Pairs
+        with the browser's Web Speech API on the client, with this as the
+        fallback. `audio` is raw bytes or a path."""
+        self._require_provider("transcribe", "transcribe")
+        data = bytes(audio) if isinstance(audio, (bytes, bytearray)) else Path(audio).read_bytes()
+        return self.provider.transcribe(data, media_type=media_type, language=language)
 
     # --- tools / exposure map (D3) ------------------------------------------
 
@@ -176,8 +218,13 @@ class RelioAI:
             for s in self.tools.list()
         ]
 
-    def call_tool(self, name: str, *, confirm: bool = False, **kwargs: Any) -> Any:
-        return self.tools.call(name, confirm=confirm, **kwargs)
+    def call_tool(
+        self, name: str, *, scope: Optional[Scope] = None, confirm: bool = False, **kwargs: Any
+    ) -> Any:
+        """Invoke an exposed tool. If the tool declares a `scope` parameter, the
+        given `scope` is injected for it (per-request principal) — pass the
+        current request's Scope for multi-tenant isolation."""
+        return self.tools.call(name, scope=scope, confirm=confirm, **kwargs)
 
     # --- agents (D4) ---------------------------------------------------------
 

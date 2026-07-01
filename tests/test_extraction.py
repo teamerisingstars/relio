@@ -6,7 +6,7 @@ import pytest
 from relio import RelioAI
 from relio.embedding.base import DeterministicEmbedder
 from relio.memory import Memory
-from relio.server.llm.base import LLMProvider, Message
+from relio.server.llm.base import CapabilityError, LLMProvider, Message
 from relio.server.llm.fake import FakeProvider
 
 BOM_SCHEMA = {"properties": {"part_no": {}, "qty": {}, "material": {}}}
@@ -46,8 +46,11 @@ class StreamOnlyProvider(LLMProvider):
 
 
 def test_provider_without_extract_raises(tmp_path):
+    # The capability guard fires early with a clear CapabilityError (ADR-003),
+    # before the provider's own NotImplementedError could surface.
     ai = _ai(tmp_path, provider=StreamOnlyProvider())
-    with pytest.raises(NotImplementedError):
+    assert ai.supports("extract") is False
+    with pytest.raises(CapabilityError):
         ai.extract("text", schema=BOM_SCHEMA)
     ai.close()
 

@@ -89,3 +89,38 @@ def test_get_by_id_across_tenants_is_404(auth_client):
     assert auth_client.get(f"/api/memory/{rid}", headers=_h("sk-alice")).status_code == 200
     assert auth_client.get(f"/api/memory/{rid}", headers=_h("sk-bob")).status_code == 404
     assert auth_client.delete(f"/api/memory/{rid}", headers=_h("sk-bob")).status_code == 404
+
+
+# --- extra_routers are protected by the same auth hook ----------------------
+
+def _custom_router():
+    from fastapi import APIRouter
+
+    r = APIRouter()
+
+    @r.get("/api/custom/secret")
+    def secret():
+        return {"ok": True}
+
+    return r
+
+
+def test_extra_routers_are_protected_by_auth_by_default(tmp_path):
+    memory = Memory(path=str(tmp_path / "e.db"), embedder=DeterministicEmbedder(dim=16))
+    app = create_app(memory, FakeProvider(), auth=ApiKeyAuth(KEYS), extra_routers=[_custom_router()])
+    with TestClient(app) as c:
+        # No key → the custom endpoint is 401, not wide open (the footgun).
+        assert c.get("/api/custom/secret").status_code == 401
+        assert c.get("/api/custom/secret", headers=_h("sk-alice")).status_code == 200
+    memory.close()
+
+
+def test_extra_routers_can_opt_out_of_protection(tmp_path):
+    memory = Memory(path=str(tmp_path / "e2.db"), embedder=DeterministicEmbedder(dim=16))
+    app = create_app(
+        memory, FakeProvider(), auth=ApiKeyAuth(KEYS),
+        extra_routers=[_custom_router()], protect_extra_routers=False,
+    )
+    with TestClient(app) as c:
+        assert c.get("/api/custom/secret").status_code == 200  # explicitly public
+    memory.close()

@@ -51,9 +51,43 @@ class Agent:
     def call_tool(self, name: str, *, confirm: bool = False, **kwargs: Any) -> Any:
         if self._allowed is not None and name not in self._allowed:
             raise PermissionError(f"agent {self.name!r} may not call tool {name!r}")
-        return self.ai.call_tool(name, confirm=confirm, **kwargs)
+        # This agent's space is its principal — injected into scope-aware tools.
+        return self.ai.call_tool(name, scope=self.space, confirm=confirm, **kwargs)
 
     # --- reasoning (scoped to this agent) -----------------------------------
+
+    def run(self, task: str, max_steps: int = 6) -> str:
+        """Autonomous loop: the LLM picks tools from this agent's slice, we execute
+        them, feed results back, and repeat until it returns a final answer.
+        Destructive tools are never auto-run — they're blocked pending confirmation.
+        """
+        from .server.llm.base import CapabilityError, Message
+
+        if self.ai.provider is None:
+            raise RuntimeError("agent.run needs an LLM provider")
+        if not self.ai.provider.supports("complete_with_tools"):
+            raise CapabilityError(
+                f"the {type(self.ai.provider).__name__} provider does not support "
+                "tool-calling ('complete_with_tools'), which agent.run requires"
+            )
+        tool_defs = [t for t in self.ai.list_tools() if self._allowed is None or t["name"] in self._allowed]
+        messages = [Message(role="user", content=task)]
+        for _ in range(max_steps):
+            step = self.ai.provider.complete_with_tools(messages, self.system, tool_defs)
+            if "text" in step and "tool_calls" not in step:
+                return step["text"]
+            for call in step.get("tool_calls", []):
+                name, args = call["name"], call.get("arguments", {})
+                spec = self.ai.tools._tools.get(name)
+                if self._allowed is not None and name not in self._allowed:
+                    output = f"[tool {name} denied: not in this agent's tools]"
+                elif spec is not None and spec.destructive:
+                    output = f"[tool {name} blocked: destructive, needs human confirmation]"
+                else:
+                    output = self.ai.call_tool(name, scope=self.space, **args)
+                messages.append(Message(role="assistant", content=f"calling {name}"))
+                messages.append(Message(role="user", content=f"[tool {name}] result: {output}"))
+        return step.get("text", "[max steps reached]")
 
     def chat(self, message: str, **kwargs: Any) -> Iterator[str]:
         if self.ai.provider is None:

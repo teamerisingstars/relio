@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Optional, Sequence
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from ..memory import Memory
@@ -26,6 +26,7 @@ def create_app(
     auth: AuthHook = anonymous_auth,
     *,
     extra_routers: Optional[Sequence[object]] = None,
+    protect_extra_routers: bool = True,
     rate_limit: Optional[tuple[int, float]] = None,
     max_body_bytes: Optional[int] = None,
     cors_origins: Optional[Sequence[str]] = None,
@@ -39,14 +40,18 @@ def create_app(
 
     app.include_router(build_memory_router(memory, auth))
     app.include_router(build_history_router(memory, auth))
-    app.include_router(build_graph_router(memory))
+    app.include_router(build_graph_router(memory, auth))
     # The LLM is optional: chat only exists when a provider is supplied.
     if provider is not None:
         app.include_router(build_chat_router(memory, provider, settings, auth))
     # App routers must register BEFORE the SPA catch-all (mounted last), or the
-    # frontend would shadow them.
+    # frontend would shadow them. They're protected by the SAME `auth` hook as the
+    # built-ins by default — otherwise `create_app(auth=...)` would give a false
+    # sense of security while leaving your own endpoints wide open. Opt out with
+    # `protect_extra_routers=False` for genuinely public routers.
+    extra_deps = [Depends(auth)] if protect_extra_routers else []
     for router in extra_routers or []:
-        app.include_router(router)
+        app.include_router(router, dependencies=extra_deps)
 
     app.state.relio_memory = memory
     app.state.relio_provider = provider

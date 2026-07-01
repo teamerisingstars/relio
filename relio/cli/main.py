@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -11,6 +14,12 @@ from .scaffold import write_scaffold
 
 Runner = Callable[..., int]
 Spawn = Callable[..., "subprocess.Popen[bytes]"]
+
+
+def _npm() -> str:
+    """Windows ships npm as `npm.cmd`; a bare `"npm"` isn't found by CreateProcess
+    (→ WinError 2). Resolve it, falling back to the platform-correct name."""
+    return shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
 
 
 def run(cmd: list[str], cwd: Optional[str] = None) -> int:
@@ -44,10 +53,16 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
 
     sub.add_parser("dockerfile", help="write the production Dockerfile")
-    sub.add_parser("deploy", help="build the Docker image")
+    deploy = sub.add_parser("deploy", help="build the Docker image")
+    deploy.add_argument("--name", default="relio-app", help="image name/tag (default: relio-app)")
 
     sdk = sub.add_parser("sdk", help="generate TS + Python client SDKs from the API")
     sdk.add_argument("--out", default="sdk", help="output directory (default: sdk)")
+    sdk.add_argument(
+        "--app", default="app:app",
+        help="your FastAPI app as module:attr (default: app:app) — so the SDK "
+             "covers your custom endpoints",
+    )
 
     develop = sub.add_parser("develop", help="drive Claude Code to build the app")
     develop.add_argument("prompt", nargs="?", help="what to build (optional)")
@@ -58,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     check = sub.add_parser("check", help="fail if any module lacks a test or a doc")
     check.add_argument("--path", default=".", help="project root to check (default: .)")
+
+    migrate = sub.add_parser(
+        "migrate", help="copy a memory store between backends (e.g. SQLite -> Postgres)"
+    )
+    migrate.add_argument("--from", dest="src", required=True, help="source: SQLite path or postgres:// URL")
+    migrate.add_argument("--to", dest="dst", required=True, help="destination: SQLite path or postgres:// URL")
+    migrate.add_argument(
+        "--no-embed", action="store_true",
+        help="structured-only copy: skip re-embedding (recall won't work until re-embedded)",
+    )
 
     ai = sub.add_parser("ai", help="AI-application framework (AIApp) commands")
     ai_sub = ai.add_subparsers(dest="ai_command", required=True)
@@ -81,19 +106,21 @@ def cmd_dev(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
     # Start the backend (auto-reload) in the background, then run the Vite dev
     # server in the foreground (it proxies /api to the backend). Stop the backend
     # when the dev server exits.
-    backend = spawner(["uvicorn", "app:app", "--reload"])
+    backend = spawner([sys.executable, "-m", "uvicorn", "app:app", "--reload"])
     try:
-        return runner(["npm", "--prefix", "web", "run", "dev"])
+        return runner([_npm(), "--prefix", "web", "run", "dev"])
     finally:
         backend.terminate()
 
 
 def cmd_build(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    return runner(["npm", "--prefix", "web", "run", "build"])
+    return runner([_npm(), "--prefix", "web", "run", "build"])
 
 
 def cmd_serve(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    return runner(["uvicorn", "app:app", "--host", "0.0.0.0", "--port", str(args.port)])
+    return runner(
+        [sys.executable, "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", str(args.port)]
+    )
 
 
 def cmd_dockerfile(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
@@ -102,13 +129,23 @@ def cmd_dockerfile(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> 
 
 
 def cmd_deploy(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    return runner(["docker", "build", "-t", "relio-app", "."])
+    return runner(["docker", "build", "-t", getattr(args, "name", "relio-app"), "."])
 
 
 def cmd_sdk(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
     from relio.sdkgen import app_schema, generate_all
 
-    files = generate_all(app_schema())
+    app_spec = getattr(args, "app", "app:app")
+    try:
+        schema = app_schema(app_spec)
+    except Exception as exc:  # import error, missing attr, bad app — don't ship a partial SDK
+        print(
+            f"relio sdk: couldn't load your app '{app_spec}': {exc}\n"
+            f"Run this from your project root, or pass --app module:attr.",
+            file=sys.stderr,
+        )
+        return 1
+    files = generate_all(schema)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     for name, content in files.items():
@@ -141,12 +178,14 @@ def cmd_develop(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int
 
 
 def cmd_test(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    pytest_cmd = ["pytest"]
+    # `sys.executable -m pytest` always resolves; a bare "pytest" isn't reliably
+    # on PATH (esp. in venvs / on Windows → WinError 2).
+    pytest_cmd = [sys.executable, "-m", "pytest"]
     if getattr(args, "coverage", False):
         pytest_cmd += ["--cov=.", f"--cov-fail-under={args.min}"]
     rc = runner(pytest_cmd)
     if Path("web/package.json").exists():
-        rc = runner(["npm", "--prefix", "web", "test"]) or rc
+        rc = runner([_npm(), "--prefix", "web", "test"]) or rc
     return rc
 
 
@@ -160,6 +199,31 @@ def cmd_check(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
         print(f"{len(violations)} violation(s): every module needs a test and a doc.")
         return 1
     print("OK: every module has a test and a doc.")
+    return 0
+
+
+def cmd_migrate(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
+    from ..migrate import migrate_records, open_backend
+
+    embed = not args.no_embed
+    if embed:
+        from ..embedding.local import LocalEmbedder
+
+        embedder = LocalEmbedder()
+    else:
+        # No vectors requested — a zero-cost stand-in just supplies the dim.
+        from ..embedding.base import DeterministicEmbedder
+
+        embedder = DeterministicEmbedder()
+    src = open_backend(args.src, dim=embedder.dim)
+    dst = open_backend(args.dst, dim=embedder.dim)
+    try:
+        n = migrate_records(src, dst, embedder, embed=embed)
+    finally:
+        src.close()
+        dst.close()
+    how = "re-embedded" if embed else "without vectors"
+    print(f"migrated {n} records from {args.src} to {args.dst} ({how})")
     return 0
 
 
@@ -184,6 +248,7 @@ _HANDLERS: dict[str, Callable[[argparse.Namespace, Runner, Spawn], int]] = {
     "develop": cmd_develop,
     "test": cmd_test,
     "check": cmd_check,
+    "migrate": cmd_migrate,
 }
 
 

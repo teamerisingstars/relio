@@ -26,5 +26,7 @@ class ChatRequest(BaseModel):
 
 class QueryRequest(BaseModel):
     type: Optional[MemoryType] = None
-    where: dict[str, str] = {}  # exact metadata equality filters
+    where: dict[str, Any] = {}  # metadata filters; keys may use field__op operators
+    order_by: Optional[str] = None
     limit: int = 100
+    offset: int = 0

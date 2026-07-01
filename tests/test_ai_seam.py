@@ -51,6 +51,38 @@ def test_structured_query_through_the_seam(tmp_path):
     ai.close()
 
 
+def test_transcribe_through_the_seam(tmp_path):
+    ai = _ai(tmp_path, provider=FakeProvider())
+    assert ai.transcribe(b"\x00\x01\x02") == "[transcript of 3 bytes]"
+    ai.close()
+
+
+def test_transcribe_requires_a_provider(tmp_path):
+    ai = _ai(tmp_path)
+    with pytest.raises(RuntimeError):
+        ai.transcribe(b"abc")
+    ai.close()
+
+
+def test_capability_guard_raises_early_on_unsupported(tmp_path):
+    from relio.server.llm.base import CapabilityError, LLMProvider
+
+    class ChatOnly(LLMProvider):
+        def stream(self, messages, system):
+            yield "hi"
+
+    ai = _ai(tmp_path, provider=ChatOnly())
+    assert ai.supports("transcribe") is False
+    with pytest.raises(CapabilityError):
+        ai.transcribe(b"abc")
+    ai.close()
+
+
+def test_supports_reports_provider_capabilities(tmp_path):
+    assert _ai(tmp_path, provider=FakeProvider()).supports("complete_with_tools") is True
+    assert _ai(tmp_path).supports("transcribe") is False  # no provider at all
+
+
 def test_chat_requires_a_provider(tmp_path):
     ai = _ai(tmp_path)  # no provider
     assert ai.has_llm is False

@@ -8,15 +8,23 @@ from .base import LLMProvider, Message
 class ClaudeProvider(LLMProvider):
     """Streams replies from Claude via the Anthropic SDK."""
 
-    def __init__(self, model: str = "claude-opus-4-8", client: Optional[object] = None) -> None:
+    def __init__(
+        self,
+        model: str = "claude-opus-4-8",
+        *,
+        api_key: Optional[str] = None,
+        client: Optional[object] = None,
+    ) -> None:
         self._model = model
+        self._api_key = api_key
         self._client = client  # created lazily on first use — no API key needed at boot
 
     def _get_client(self):
         if self._client is None:
             import anthropic
 
-            self._client = anthropic.Anthropic()
+            # api_key=None → the SDK falls back to ANTHROPIC_API_KEY (env).
+            self._client = anthropic.Anthropic(api_key=self._api_key)
         return self._client
 
     def stream(self, messages: list[Message], system: str) -> Iterator[str]:
@@ -58,3 +66,29 @@ class ClaudeProvider(LLMProvider):
         )
         text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
         return json.loads(text)
+
+    def complete_with_tools(self, messages, system, tools) -> dict:
+        anth_tools = [
+            {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {p: {"type": "string"} for p in t.get("parameters", {})},
+                },
+            }
+            for t in tools
+        ]
+        wire = [{"role": m.role, "content": m.content} for m in messages if m.role != "system"]
+        msg = self._get_client().messages.create(
+            model=self._model, max_tokens=2048, system=system, tools=anth_tools, messages=wire
+        )
+        calls = [
+            {"name": b.name, "arguments": b.input}
+            for b in msg.content
+            if getattr(b, "type", None) == "tool_use"
+        ]
+        if calls:
+            return {"tool_calls": calls}
+        text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+        return {"text": text}

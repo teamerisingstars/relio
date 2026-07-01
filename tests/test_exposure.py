@@ -42,6 +42,46 @@ def test_call_tool_invokes_and_unknown_raises(tmp_path):
     ai.close()
 
 
+def test_scope_param_is_injected_and_hidden_from_the_llm(tmp_path):
+    from relio.record import Scope
+
+    ai = _ai(tmp_path)
+    seen = {}
+
+    @ai.tool
+    def list_campaigns(status: str, scope: Scope = None) -> list:
+        """List campaigns for the current tenant."""
+        seen["tenant"] = scope.tenant if scope else None
+        return [status]
+
+    # `scope` is NOT part of the LLM-facing parameter schema...
+    assert ai.list_tools()[0]["parameters"] == {"status": "str"}
+    # ...it's injected per-call with the caller's principal.
+    ai.call_tool("list_campaigns", scope=Scope(tenant="acme"), status="active")
+    assert seen["tenant"] == "acme"
+    # A different request carries a different tenant through the SAME tool.
+    ai.call_tool("list_campaigns", scope=Scope(tenant="globex"), status="paused")
+    assert seen["tenant"] == "globex"
+    ai.close()
+
+
+def test_agent_injects_its_own_space_as_scope(tmp_path):
+    from relio.record import Scope
+
+    ai = _ai(tmp_path)
+    seen = {}
+
+    @ai.tool
+    def whoami(scope: Scope = None) -> str:
+        seen["agent"] = scope.agent if scope else None
+        return "ok"
+
+    agent = ai.agent("reporter", tools=["whoami"])
+    agent.call_tool("whoami")
+    assert seen["agent"] == "reporter"  # the agent's space is its principal
+    ai.close()
+
+
 def test_expose_field_allowlist_drops_private_fields(tmp_path):
     ai = _ai(tmp_path)
 

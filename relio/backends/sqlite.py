@@ -10,7 +10,9 @@ from typing import Iterator, Optional
 import sqlite_vec
 
 from ..record import MemoryRecord, MemoryType, Scope
-from .base import StorageBackend
+from .base import StorageBackend, split_op
+
+_SQL_OP = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "ne": "!="}
 
 _KEY = re.compile(r"^\w+$")  # guard interpolated json paths against injection
 
@@ -125,8 +127,10 @@ class SQLiteBackend(StorageBackend):
         *,
         type: Optional[MemoryType] = None,
         scope: Optional[Scope] = None,
-        metadata: Optional[dict[str, str]] = None,
+        where: Optional[dict] = None,
+        order_by: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[MemoryRecord]:
         clauses: list[str] = []
         params: list[object] = []
@@ -139,15 +143,35 @@ class SQLiteBackend(StorageBackend):
                 if value is not None:
                     clauses.append(f"json_extract(doc, '$.scope.{field}') = ?")
                     params.append(value)
-        for key, value in (metadata or {}).items():
-            if not _KEY.match(key):
-                raise ValueError(f"invalid metadata key: {key!r}")
-            clauses.append(f"json_extract(doc, '$.metadata.{key}') = ?")
-            params.append(value)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
+        for key, value in (where or {}).items():
+            field, op = split_op(key)
+            if not _KEY.match(field):
+                raise ValueError(f"invalid where field: {field!r}")
+            col = f"json_extract(doc, '$.metadata.{field}')"
+            if op == "contains":
+                clauses.append(f"{col} LIKE ?")
+                params.append(f"%{value}%")
+            elif op == "startswith":
+                clauses.append(f"{col} LIKE ?")
+                params.append(f"{value}%")
+            elif op == "in":
+                values = list(value)
+                clauses.append(f"{col} IN ({', '.join('?' for _ in values)})")
+                params.extend(values)
+            else:
+                clauses.append(f"{col} {_SQL_OP.get(op, '=')} ?")
+                params.append(value)
+        where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        order_sql = " ORDER BY rid"
+        if order_by:
+            desc = order_by.startswith("-")
+            field = order_by.lstrip("-")
+            if not _KEY.match(field):
+                raise ValueError(f"invalid order_by field: {field!r}")
+            order_sql = f" ORDER BY json_extract(doc, '$.metadata.{field}') {'DESC' if desc else 'ASC'}"
+        params += [limit, offset]
         rows = self._db.execute(
-            f"SELECT doc FROM records{where} ORDER BY rid LIMIT ?", params
+            f"SELECT doc FROM records{where_sql}{order_sql} LIMIT ? OFFSET ?", params
         ).fetchall()
         return [MemoryRecord.model_validate_json(r["doc"]) for r in rows]
 

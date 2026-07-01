@@ -10,11 +10,12 @@ from pydantic import BaseModel, Field
 
 
 class MemoryType(str, Enum):
-    SEMANTIC = "semantic"
-    FACT = "fact"
-    SESSION = "session"
-    NODE = "node"
-    EDGE = "edge"
+    SEMANTIC = "semantic"   # general knowledge / meaning
+    EPISODIC = "episodic"   # a time-anchored event ("what happened, when")
+    FACT = "fact"           # a discrete asserted fact
+    SESSION = "session"     # a conversation turn (chronological, usually not embedded)
+    NODE = "node"           # a graph node
+    EDGE = "edge"           # a graph edge
 
 
 class Scope(BaseModel):

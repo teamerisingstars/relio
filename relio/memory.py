@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Mapping, Optional, Union
 
 from .backends.base import StorageBackend
 from .backends.sqlite import SQLiteBackend
@@ -25,9 +25,11 @@ class Memory:
         database_url: Optional[str] = None,
     ) -> None:
         if embedder is None:
-            from .embedding.local import LocalEmbedder
+            # Honor RELIO_EMBEDDER (e.g. "deterministic" for offline/CI/tests) so
+            # a bare Memory() doesn't force the ~130MB local-model download.
+            from .embedding.registry import make_embedder
 
-            embedder = LocalEmbedder()
+            embedder = make_embedder()
         self._embedder = CachingEmbedder(embedder)
         if backend is not None:
             self._backend = backend
@@ -79,25 +81,47 @@ class Memory:
 
     def add_many(
         self,
-        contents: list[str],
+        items: list[Union[str, Mapping[str, Any]]],
         type: MemoryType = MemoryType.SEMANTIC,
         scope: Optional[Scope] = None,
         embed: bool = True,
     ) -> list[MemoryRecord]:
-        """Bulk-add records, embedding all contents in one batch and writing them
-        in a single transaction (atomic, and far cheaper than N single adds)."""
-        records = [
-            MemoryRecord(type=type, content=content, scope=scope or Scope())
-            for content in contents
-        ]
+        """Bulk-add records in one embed batch + one transaction (atomic, far
+        cheaper than N single adds).
+
+        Each item is either a plain string (its content) **or** a mapping for
+        bulk-ingesting rows with structure — `{"content", "type"?, "scope"?,
+        "data"?, "metadata"?}` — so you can load records that carry per-row
+        metadata, not just bare text. The `type`/`scope` args are per-call
+        defaults; a mapping may override them.
+        """
+        default_scope = scope or Scope()
+        records: list[MemoryRecord] = []
+        for item in items:
+            if isinstance(item, str):
+                records.append(MemoryRecord(type=type, content=item, scope=default_scope))
+            elif isinstance(item, Mapping):
+                item_scope = item.get("scope")
+                records.append(
+                    MemoryRecord(
+                        type=item.get("type", type),
+                        content=item.get("content", ""),
+                        scope=item_scope if item_scope is not None else default_scope,
+                        data=dict(item.get("data") or {}),
+                        metadata=dict(item.get("metadata") or {}),
+                    )
+                )
+            else:
+                raise TypeError(
+                    f"add_many items must be str or mapping, got {item.__class__.__name__}"
+                )
+        contents = [r.content for r in records]
         embeddings = (
-            self._embedder.embed_batch(list(contents))
-            if embed
-            else [None] * len(contents)
+            self._embedder.embed_batch(contents) if embed else [None] * len(records)
         )
         with self._backend.transaction():
-            for record, content, embedding in zip(records, contents, embeddings):
-                self._backend.add(record, embedding if (embed and content) else None)
+            for record, embedding in zip(records, embeddings):
+                self._backend.add(record, embedding if (embed and record.content) else None)
         self._invalidate()
         return records
 
@@ -152,15 +176,21 @@ class Memory:
         self,
         type: Optional[MemoryType] = None,
         scope: Optional[Scope] = None,
-        where: Optional[dict[str, str]] = None,
+        where: Optional[dict] = None,
+        order_by: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[MemoryRecord]:
-        """Structured (non-semantic) filter by exact type / scope / metadata.
+        """Structured (non-semantic) filter. `where` supports `field__op` operators
+        (`gt/gte/lt/lte/contains`, default exact); `order_by` a metadata field
+        (`-field` = desc); plus `limit`/`offset` pagination.
 
         Unlike recall(), this needs no query embedding and returns records that
         were never embedded — the path for non-AI / data-style listing.
         """
-        return self._backend.query(type=type, scope=scope, metadata=where, limit=limit)
+        return self._backend.query(
+            type=type, scope=scope, where=where, order_by=order_by, limit=limit, offset=offset
+        )
 
     def transaction(self):
         """Group multiple writes atomically: `with memory.transaction(): ...`."""
@@ -204,19 +234,19 @@ class Memory:
         return self.link(source_id, predicate, target_id)
 
     def neighbors(
-        self, node_id: str, predicate: Optional[str] = None
+        self, node_id: str, predicate: Optional[str] = None, scope: Optional[Scope] = None
     ) -> list[MemoryRecord]:
-        return self._graph.neighbors(node_id, predicate=predicate)
+        return self._graph.neighbors(node_id, predicate=predicate, scope=scope)
 
     def in_neighbors(
-        self, node_id: str, predicate: Optional[str] = None
+        self, node_id: str, predicate: Optional[str] = None, scope: Optional[Scope] = None
     ) -> list[MemoryRecord]:
-        return self._graph.in_neighbors(node_id, predicate=predicate)
+        return self._graph.in_neighbors(node_id, predicate=predicate, scope=scope)
 
     def traverse(
-        self, start_id: str, depth: int = 1, predicate: Optional[str] = None
+        self, start_id: str, depth: int = 1, predicate: Optional[str] = None, scope: Optional[Scope] = None
     ) -> list[MemoryRecord]:
-        return self._graph.traverse(start_id, depth=depth, predicate=predicate)
+        return self._graph.traverse(start_id, depth=depth, predicate=predicate, scope=scope)
 
     def close(self) -> None:
         self._backend.close()

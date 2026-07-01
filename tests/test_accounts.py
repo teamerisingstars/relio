@@ -106,14 +106,19 @@ def test_google_callback_creates_then_reuses_user():
     google = GoogleOAuth("cid", "sec", "https://app/cb", fetch=lambda code: {"email": "g@b.com", "name": "G"})
     client = TestClient(_app(store, google=google))
 
+    from urllib.parse import parse_qs, urlparse
+
     redirect = client.get("/auth/google", follow_redirects=False)
     assert redirect.status_code in (302, 307)
     assert "accounts.google.com" in redirect.headers["location"]
+    state = parse_qs(urlparse(redirect.headers["location"]).query)["state"][0]  # CSRF state
 
-    cb = client.get("/auth/google/callback", params={"code": "abc"})
+    cb = client.get("/auth/google/callback", params={"code": "abc", "state": state})
     assert cb.status_code == 200 and "token" in cb.json()
     assert store.get_by_email("g@b.com") is not None
     first_id = store.get_by_email("g@b.com").id
 
-    cb2 = client.get("/auth/google/callback", params={"code": "def"})  # same user reused
+    r2 = client.get("/auth/google", follow_redirects=False)
+    state2 = parse_qs(urlparse(r2.headers["location"]).query)["state"][0]
+    cb2 = client.get("/auth/google/callback", params={"code": "def", "state": state2})
     assert cb2.json()["user_id"] == first_id

@@ -95,3 +95,32 @@ def test_add_many_without_embedding_is_query_only(tmp_path):
     assert m.recall("x") == []  # not embedded
     assert len(m.query(type=MemoryType.SESSION)) == 2
     m.close()
+
+
+def test_add_many_accepts_rows_with_metadata(tmp_path):
+    from relio.record import Scope
+
+    m = _mem(tmp_path)
+    records = m.add_many(
+        [
+            "a plain string still works",
+            {"content": "ROAS row", "metadata": {"roas": 3.2, "campaign": "c1"}},
+            {"content": "other tenant row", "scope": Scope(tenant="t2"), "data": {"raw": 1}},
+        ],
+        embed=False,
+    )
+    assert len(records) == 3
+    # metadata is queryable (range filter + ordering — the reporting use case)
+    hot = m.query(where={"roas__gt": 3.0})
+    assert [r.metadata["campaign"] for r in hot] == ["c1"]
+    # per-row scope + data are honored
+    assert records[2].scope.tenant == "t2"
+    assert records[2].data == {"raw": 1}
+    m.close()
+
+
+def test_add_many_rejects_bad_item_types(tmp_path):
+    m = _mem(tmp_path)
+    with pytest.raises(TypeError):
+        m.add_many([123])  # not str or mapping
+    m.close()

@@ -60,6 +60,23 @@ def test_web_scaffold_creates_react_app_with_generated_sdk(tmp_path):
     assert "node:" in df and "npm run build" in df
 
 
+def test_web_tsconfig_does_not_break_build_on_generated_code():
+    # `npm run build` runs `tsc && vite build`. The generated SDK has unused type
+    # imports and the presence *.test.tsx files use vitest globals — both would
+    # fail tsc. The scaffold's tsconfig must accommodate them.
+    import json
+    from pathlib import Path
+
+    import relio
+
+    ts = json.loads(
+        (Path(relio.__file__).parent / "templates" / "web" / "tsconfig.json").read_text()
+    )
+    assert ts["compilerOptions"]["noUnusedLocals"] is False   # generated SDK imports
+    excluded = ts.get("exclude", [])
+    assert any("test" in pattern for pattern in excluded)     # tests type-checked by vitest
+
+
 def test_web_template_react_versions_are_aligned():
     # Regression guard for #10: a Dependabot bump left react on 19 while
     # react-dom / @types stayed on 18, breaking `npm install`. react and

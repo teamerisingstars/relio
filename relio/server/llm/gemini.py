@@ -39,3 +39,31 @@ class GeminiProvider(LLMProvider):
             text = getattr(chunk, "text", None)
             if text:
                 yield text
+
+    def complete_with_tools(self, messages, system, tools) -> dict:
+        from google.genai import types  # lazy
+
+        decls = [
+            types.FunctionDeclaration(
+                name=t["name"],
+                description=t.get("description", ""),
+                parameters={
+                    "type": "object",
+                    "properties": {p: {"type": "string"} for p in t.get("parameters", {})},
+                },
+            )
+            for t in tools
+        ]
+        contents = "\n".join(f"{m.role}: {m.content}" for m in messages if m.role != "system")
+        resp = self._get_client().models.generate_content(
+            model=self._model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system or None,
+                tools=[types.Tool(function_declarations=decls)] if decls else None,
+            ),
+        )
+        calls = getattr(resp, "function_calls", None)
+        if calls:
+            return {"tool_calls": [{"name": c.name, "arguments": dict(c.args or {})} for c in calls]}
+        return {"text": getattr(resp, "text", "") or ""}

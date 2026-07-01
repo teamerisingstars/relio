@@ -1,7 +1,7 @@
 # tests/test_providers.py
 import pytest
 
-from relio.server.llm.base import LLMProvider, Message
+from relio.server.llm.base import CapabilityError, LLMProvider, Message
 from relio.server.llm.fake import FakeProvider
 from relio.server.llm.gemini import GeminiProvider
 from relio.server.llm.openai import OpenAIProvider
@@ -24,9 +24,47 @@ def test_make_provider_unknown_raises():
         make_provider("bogus")
 
 
+def test_make_provider_requires_capabilities_that_are_present():
+    # Fake supports everything optional — requiring them builds fine.
+    p = make_provider("fake", requires=["transcribe", "complete_with_tools"])
+    assert isinstance(p, FakeProvider)
+
+
+def test_make_provider_requires_capabilities_that_are_missing():
+    # Gemini has no transcribe — requiring it fails fast at construction.
+    with pytest.raises(CapabilityError):
+        make_provider("gemini", requires=["transcribe"])
+
+
+def test_make_provider_requires_with_disabled_provider_is_an_error():
+    with pytest.raises(CapabilityError):
+        make_provider("none", requires=["extract"])
+
+
 def test_provider_classes_are_llm_providers():
     assert issubclass(OpenAIProvider, LLMProvider)
     assert issubclass(GeminiProvider, LLMProvider)
+
+
+def test_capabilities_are_derived_from_overrides():
+    # Fake implements everything optional; a chat-only provider implements none.
+    class ChatOnly(LLMProvider):
+        def stream(self, messages, system):
+            yield "hi"
+
+    fake_caps = FakeProvider().capabilities()
+    assert fake_caps == {"extract", "complete_with_tools", "transcribe"}
+    assert FakeProvider().supports("transcribe") is True
+
+    chat_only = ChatOnly()
+    assert chat_only.capabilities() == set()
+    assert chat_only.supports("extract") is False
+
+
+def test_openai_supports_transcribe_but_gemini_does_not():
+    # OpenAI overrides transcribe (Whisper); Gemini does not.
+    assert OpenAIProvider().supports("transcribe") is True
+    assert GeminiProvider().supports("transcribe") is False
 
 
 def test_providers_construct_lazily_without_key_or_sdk():
@@ -37,6 +75,15 @@ def test_providers_construct_lazily_without_key_or_sdk():
     ClaudeProvider()          # no ANTHROPIC_API_KEY needed to construct
     OpenAIProvider()          # no openai SDK needed to construct
     GeminiProvider()          # no google-genai SDK needed to construct
+
+
+def test_claude_provider_accepts_api_key():
+    # Parity with OpenAIProvider (and matches the documented API): an explicit
+    # key can be passed, and make_provider forwards it.
+    from relio.server.llm.claude import ClaudeProvider
+
+    assert ClaudeProvider(api_key="sk-ant-test")._api_key == "sk-ant-test"
+    assert make_provider("claude", api_key="sk-ant-test")._api_key == "sk-ant-test"
 
 
 # --- OpenAI provider stream (injected client, no SDK/API needed) ------------

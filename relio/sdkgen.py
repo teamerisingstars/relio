@@ -360,8 +360,36 @@ def generate_all(openapi: dict) -> dict[str, str]:
     }
 
 
-def app_schema() -> dict:
-    """Build a throwaway app purely to read its static OpenAPI schema."""
+def app_schema(app_spec: str = "app:app") -> dict:
+    """Read the OpenAPI schema from the **user's** FastAPI app so the generated
+    SDK covers their custom endpoints — not just Relio's built-ins.
+
+    `app_spec` is `"module:attr"` (default `app:app`), imported relative to the
+    current working directory. Raises if the app can't be imported — a partial
+    SDK should never be shipped silently.
+    """
+    import importlib
+    import os
+    import sys
+
+    module_name, _, attr = app_spec.partition(":")
+    attr = attr or "app"
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+    # Reload if already imported (e.g. repeated runs in one process) so we read
+    # the current app, not a cached one.
+    if module_name in sys.modules:
+        module = importlib.reload(sys.modules[module_name])
+    else:
+        module = importlib.import_module(module_name)
+    app = getattr(module, attr)
+    return app.openapi()
+
+
+def reference_schema() -> dict:
+    """OpenAPI for a bare Relio app (built-in routes only). Used when no user app
+    exists yet — e.g. while `relio new` is scaffolding the project."""
     import os
     import tempfile
 

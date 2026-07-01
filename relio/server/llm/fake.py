@@ -20,6 +20,17 @@ class FakeProvider(LLMProvider):
         for word in reply.split(" "):
             yield word + " "
 
+    def complete_with_tools(self, messages, system, tools) -> dict:
+        # Deterministic: call the first available tool once, then finish. Enough
+        # to exercise the agent loop offline.
+        already_ran = any("[tool " in m.content for m in messages)
+        if tools and not already_ran:
+            return {"tool_calls": [{"name": tools[0]["name"], "arguments": {}}]}
+        return {"text": "done"}
+
+    def transcribe(self, audio, *, media_type=None, language=None) -> str:
+        return f"[transcript of {len(audio)} bytes]"
+
     def extract(self, prompt, schema=None, *, image_bytes=None, media_type=None) -> dict:
         # Deterministic, offline: echo where the input came from and the schema's
         # field names, so extraction wiring is testable without a real model.

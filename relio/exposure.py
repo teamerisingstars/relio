@@ -6,19 +6,27 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 
+# A tool parameter named `scope` is reserved: it's injected per-call with the
+# current principal's Scope, and hidden from the LLM-facing parameter schema — so
+# a single registered tool serves every tenant instead of being closure-bound to
+# one. The LLM never sees or controls it.
+_RESERVED_PARAMS = {"scope"}
+
+
 @dataclass
 class ToolSpec:
     name: str
     fn: Callable[..., Any]
     description: str
-    parameters: dict[str, str]  # param name -> type name
+    parameters: dict[str, str]  # param name -> type name (LLM-facing; excludes reserved)
     destructive: bool = False   # requires explicit confirm=True to run
+    wants_scope: bool = False    # fn declares a `scope` param → inject per-call
 
 
 def _param_schema(fn: Callable[..., Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for name, p in inspect.signature(fn).parameters.items():
-        if name == "self":
+        if name == "self" or name in _RESERVED_PARAMS:
             continue
         ann = p.annotation
         if ann is inspect.Parameter.empty:
@@ -26,6 +34,10 @@ def _param_schema(fn: Callable[..., Any]) -> dict[str, str]:
         else:
             out[name] = getattr(ann, "__name__", str(ann))
     return out
+
+
+def _wants_scope(fn: Callable[..., Any]) -> bool:
+    return "scope" in inspect.signature(fn).parameters
 
 
 class ExposureMap:
@@ -61,6 +73,7 @@ class ExposureMap:
                 description=description or (f.__doc__ or "").strip(),
                 parameters=_param_schema(f),
                 destructive=destructive,
+                wants_scope=_wants_scope(f),
             )
             return f
 
@@ -77,12 +90,14 @@ class ExposureMap:
             raise KeyError(f"no such tool: {name!r}")
         return self._tools[name]
 
-    def call(self, name: str, *, confirm: bool = False, **kwargs: Any) -> Any:
+    def call(self, name: str, *, scope: Any = None, confirm: bool = False, **kwargs: Any) -> Any:
         spec = self.get(name)
         if spec.destructive and not confirm:
             raise PermissionError(
                 f"tool {name!r} is destructive; call with confirm=True to run it"
             )
+        if spec.wants_scope:
+            kwargs["scope"] = scope  # per-request principal, injected — not LLM-supplied
         return spec.fn(**kwargs)
 
     @staticmethod

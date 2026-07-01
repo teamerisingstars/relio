@@ -43,6 +43,18 @@ class OpenAIProvider(LLMProvider):
             if delta:
                 yield delta
 
+    def transcribe(self, audio, *, media_type=None, language=None) -> str:
+        import io
+
+        ext = (media_type or "audio/webm").rsplit("/", 1)[-1]
+        f = io.BytesIO(bytes(audio))
+        f.name = f"audio.{ext}"  # the SDK infers the format from the filename
+        kwargs = {"model": "whisper-1", "file": f}
+        if language:
+            kwargs["language"] = language
+        resp = self._get_client().audio.transcriptions.create(**kwargs)
+        return resp.text
+
     def extract(self, prompt, schema=None, *, image_bytes=None, media_type=None) -> dict:
         content: list[dict] = []
         if image_bytes is not None:
@@ -62,3 +74,34 @@ class OpenAIProvider(LLMProvider):
             ],
         )
         return json.loads(resp.choices[0].message.content)
+
+    def complete_with_tools(self, messages, system, tools) -> dict:
+        oai_tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {p: {"type": "string"} for p in t.get("parameters", {})},
+                    },
+                },
+            }
+            for t in tools
+        ]
+        wire = [{"role": "system", "content": system}] + [
+            {"role": m.role, "content": m.content} for m in messages if m.role != "system"
+        ]
+        resp = self._get_client().chat.completions.create(
+            model=self._model, messages=wire, tools=oai_tools
+        )
+        msg = resp.choices[0].message
+        if getattr(msg, "tool_calls", None):
+            return {
+                "tool_calls": [
+                    {"name": tc.function.name, "arguments": json.loads(tc.function.arguments or "{}")}
+                    for tc in msg.tool_calls
+                ]
+            }
+        return {"text": msg.content or ""}

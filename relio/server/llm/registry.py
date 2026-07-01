@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .base import LLMProvider
+from .base import CapabilityError, LLMProvider
 from .fake import FakeProvider
 
 # The intentional, documented way to choose an AI provider — or to run with no
@@ -15,6 +15,7 @@ def make_provider(
     name: Optional[str],
     *,
     model: Optional[str] = None,
+    requires: Optional[list[str]] = None,
     **kwargs: Any,
 ) -> Optional[LLMProvider]:
     """Build an LLM provider by name.
@@ -22,24 +23,44 @@ def make_provider(
     Names: "claude" (Anthropic), "openai" (OpenAI *and* any OpenAI-compatible
     endpoint via base_url — Groq/Together/Ollama/…), "gemini" (Google), "fake"
     (offline/tests), or "none" → None (LLM disabled).
+
+    Pass `requires=["transcribe", ...]` to fail fast (`CapabilityError`) unless the
+    built provider supports every listed capability — so a config mismatch is
+    caught at construction, not deep in a request. Requiring capabilities with a
+    disabled provider ("none") is itself an error. See ADR-003.
     """
     key = (name or "none").strip().lower()
+    provider: Optional[LLMProvider]
     if key in _DISABLED:
-        return None
-    if key == "fake":
-        return FakeProvider(**kwargs)
-    if key == "claude":
+        provider = None
+    elif key == "fake":
+        provider = FakeProvider(**kwargs)
+    elif key == "claude":
         from .claude import ClaudeProvider
 
-        return ClaudeProvider(model=model or "claude-opus-4-8", **kwargs)
-    if key == "openai":
+        provider = ClaudeProvider(model=model or "claude-opus-4-8", **kwargs)
+    elif key == "openai":
         from .openai import OpenAIProvider
 
-        return OpenAIProvider(model=model or "gpt-4o", **kwargs)
-    if key == "gemini":
+        provider = OpenAIProvider(model=model or "gpt-4o", **kwargs)
+    elif key == "gemini":
         from .gemini import GeminiProvider
 
-        return GeminiProvider(model=model or "gemini-1.5-pro", **kwargs)
-    raise ValueError(
-        f"unknown provider: {name!r} (use claude, openai, gemini, fake, or none)"
-    )
+        provider = GeminiProvider(model=model or "gemini-1.5-pro", **kwargs)
+    else:
+        raise ValueError(
+            f"unknown provider: {name!r} (use claude, openai, gemini, fake, or none)"
+        )
+
+    if requires:
+        if provider is None:
+            raise CapabilityError(
+                f"provider {key!r} is disabled but capabilities {list(requires)} were required"
+            )
+        missing = [c for c in requires if not provider.supports(c)]
+        if missing:
+            raise CapabilityError(
+                f"the {type(provider).__name__} provider does not support "
+                f"required capabilities: {missing}"
+            )
+    return provider

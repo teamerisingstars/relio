@@ -60,11 +60,34 @@ def test_generate_all_returns_four_files(openapi):
     assert all(content.strip() for content in files.values())
 
 
-def test_cli_sdk_writes_files(tmp_path):
+def test_cli_sdk_introspects_the_users_app_including_custom_endpoints(tmp_path, monkeypatch):
+    # The whole point: `relio sdk` must read the USER's app.py, so custom
+    # endpoints show up in the generated client (bug: it used a throwaway app).
     from relio.cli.main import main
 
+    (tmp_path / "app.py").write_text(
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "@app.get('/api/widgets', operation_id='list_widgets')\n"
+        "def list_widgets() -> list[str]:\n"
+        "    return []\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
     out = tmp_path / "sdk"
-    rc = main(["sdk", "--out", str(out)])
-    assert rc == 0
+    assert main(["sdk", "--out", str(out)]) == 0
     for name in ("types.ts", "client.ts", "types.py", "client.py"):
         assert (out / name).read_text().strip()
+    # the custom endpoint made it into both clients
+    assert "listWidgets" in (out / "client.ts").read_text()
+    assert "def list_widgets" in (out / "client.py").read_text()
+
+
+def test_cli_sdk_fails_clearly_when_app_cannot_be_loaded(tmp_path, monkeypatch, capsys):
+    from relio.cli.main import main
+
+    monkeypatch.chdir(tmp_path)  # no app.py here
+    assert main(["sdk", "--out", str(tmp_path / "sdk")]) == 1
+    assert "couldn't load your app" in capsys.readouterr().err

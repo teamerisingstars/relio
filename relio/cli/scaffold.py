@@ -319,9 +319,11 @@ def write_scaffold(
 
 def _write_ts_sdk(sdk_dir: Path) -> None:
     """Generate the TypeScript SDK (types + client) into `sdk_dir`."""
-    from ..sdkgen import app_schema, generate_ts_client, generate_ts_types
+    from ..sdkgen import generate_ts_client, generate_ts_types, reference_schema
 
-    schema = app_schema()
+    # The user's app.py doesn't exist yet at scaffold time — seed with the
+    # built-in schema; `relio sdk` regenerates from the real app afterwards.
+    schema = reference_schema()
     sdk_dir.mkdir(parents=True, exist_ok=True)
     (sdk_dir / "types.ts").write_text(generate_ts_types(schema), encoding="utf-8")
     (sdk_dir / "client.ts").write_text(generate_ts_client(schema), encoding="utf-8")
@@ -344,7 +346,11 @@ def _write_web_scaffold(root: Path, name: str) -> Path:
 
 def _write_component_tests_and_docs(root: Path) -> None:
     """A co-located presence test + a doc for each React component, so the TS
-    governance gate (`relio check`) passes on a fresh web scaffold."""
+    governance gate (`relio check`) passes on a fresh web scaffold.
+
+    Note: component `.md` docs are named after the component stem (e.g. `App` ->
+    `docs/App.md`). On case-insensitive filesystems (Windows, default macOS) avoid
+    also hand-authoring a `docs/app.md`, as the two names collide on disk."""
     src = root / "web" / "src"
     if not src.exists():
         return
@@ -354,6 +360,7 @@ def _write_component_tests_and_docs(root: Path) -> None:
         stem = comp.stem
         (comp.parent / f"{stem}.test.tsx").write_text(
             f"// presence test for {stem} — expand with real coverage.\n"
+            f'import {{ test, expect }} from "vitest";\n\n'
             f"test('{stem} present', () => {{ expect(true).toBe(true); }});\n"
         , encoding="utf-8")
         (root / "docs" / f"{stem}.md").write_text(f"# {stem}\n\nReact component.\n", encoding="utf-8")

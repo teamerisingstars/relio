@@ -32,7 +32,12 @@ def build_memory_router(memory: Memory, auth: AuthHook = anonymous_auth) -> APIR
     @router.post("/query", operation_id="query_memory")
     def query(req: QueryRequest, scope: Scope = Depends(principal)):
         results = memory.query(
-            type=req.type, scope=scope, where=req.where or None, limit=req.limit
+            type=req.type,
+            scope=scope,
+            where=req.where or None,
+            order_by=req.order_by,
+            limit=req.limit,
+            offset=req.offset,
         )
         return {"results": results}
 

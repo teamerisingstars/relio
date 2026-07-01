@@ -14,6 +14,13 @@ def test_defaults_make_a_semantic_record_with_generated_id():
     assert r.schema_version == "1.0"
 
 
+def test_episodic_memory_type_is_available():
+    r = MemoryRecord(type=MemoryType.EPISODIC, content="deploy at 10:04")
+    assert r.type is MemoryType.EPISODIC
+    assert MemoryType("episodic") is MemoryType.EPISODIC
+    assert MemoryRecord.model_validate(r.model_dump()).type is MemoryType.EPISODIC
+
+
 def test_roundtrips_through_dict():
     r = MemoryRecord(
         type=MemoryType.FACT,

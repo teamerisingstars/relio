@@ -6,9 +6,10 @@ from contextvars import ContextVar
 from typing import Iterator, Optional
 
 from ..record import MemoryRecord, MemoryType, Scope
-from .base import StorageBackend
+from .base import StorageBackend, split_op
 
 _KEY = re.compile(r"^\w+$")  # guard interpolated json paths against injection
+_SQL_OP = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<=", "ne": "!="}
 
 
 def _vector_literal(embedding: list[float]) -> str:
@@ -134,8 +135,10 @@ class PostgresBackend(StorageBackend):
         *,
         type: Optional[MemoryType] = None,
         scope: Optional[Scope] = None,
-        metadata: Optional[dict[str, str]] = None,
+        where: Optional[dict] = None,
+        order_by: Optional[str] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[MemoryRecord]:
         clauses: list[str] = []
         params: list[object] = []
@@ -148,15 +151,43 @@ class PostgresBackend(StorageBackend):
                 if value is not None:
                     clauses.append(f"doc#>>'{{scope,{field}}}' = %s")
                     params.append(value)
-        for key, value in (metadata or {}).items():
-            if not _KEY.match(key):
-                raise ValueError(f"invalid metadata key: {key!r}")
-            clauses.append(f"doc#>>'{{metadata,{key}}}' = %s")
-            params.append(value)
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(limit)
+        for key, value in (where or {}).items():
+            field, op = split_op(key)
+            if not _KEY.match(field):
+                raise ValueError(f"invalid where field: {field!r}")
+            col = f"doc#>>'{{metadata,{field}}}'"
+            if op == "contains":
+                clauses.append(f"{col} LIKE %s")
+                params.append(f"%{value}%")
+            elif op == "startswith":
+                clauses.append(f"{col} LIKE %s")
+                params.append(f"{value}%")
+            elif op == "in":
+                values = list(value)
+                clauses.append(f"{col} IN ({', '.join('%s' for _ in values)})")
+                params.extend(values)
+            elif op == "ne":
+                clauses.append(f"{col} != %s")
+                params.append(value)
+            elif op in _SQL_OP:
+                clauses.append(f"({col})::numeric {_SQL_OP[op]} %s")
+                params.append(value)
+            else:
+                clauses.append(f"{col} = %s")
+                params.append(value)
+        where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        order_sql = " ORDER BY rid"
+        if order_by:
+            desc = order_by.startswith("-")
+            field = order_by.lstrip("-")
+            if not _KEY.match(field):
+                raise ValueError(f"invalid order_by field: {field!r}")
+            order_sql = f" ORDER BY doc#>>'{{metadata,{field}}}' {'DESC' if desc else 'ASC'}"
+        params += [limit, offset]
         with self._conn() as conn, conn.cursor() as cur:
-            cur.execute(f"SELECT doc FROM records{where} ORDER BY rid LIMIT %s", params)
+            cur.execute(
+                f"SELECT doc FROM records{where_sql}{order_sql} LIMIT %s OFFSET %s", params
+            )
             rows = cur.fetchall()
         return [_to_record(r[0]) for r in rows]
 
