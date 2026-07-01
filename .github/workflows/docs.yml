@@ -1,0 +1,26 @@
+name: docs
+
+# Publish the MkDocs site to GitHub Pages on every push to main that touches docs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "mkdocs-material>=9.5"
+      - run: mkdocs build --strict          # fail the build on broken links / stray pages
+      - run: mkdocs gh-deploy --force        # publishes to the gh-pages branch

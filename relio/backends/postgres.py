@@ -114,6 +114,15 @@ class PostgresBackend(StorageBackend):
             rows = cur.fetchall()
         return [_to_record(r[0]) for r in rows]
 
+    def iter_embeddings(self):
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT doc, embedding::text FROM records ORDER BY rid")
+            rows = cur.fetchall()
+        for doc, emb in rows:
+            # pgvector text form is "[a,b,c]"; parse back to a float list.
+            vector = [float(x) for x in emb.strip("[]").split(",") if x] if emb else None
+            yield _to_record(doc), vector
+
     def search(self, embedding: list[float], k: int) -> list[tuple[MemoryRecord, float]]:
         vec = _vector_literal(embedding)
         with self._conn() as conn, conn.cursor() as cur:
@@ -202,6 +211,29 @@ class PostgresBackend(StorageBackend):
                     yield
             finally:
                 self._active.reset(token)
+
+    def sql(self, query: str, params: Optional[tuple] = None) -> list[dict]:
+        """Run a **read-only** analytical SQL query against the `records` table and
+        return rows as dicts. The escape hatch for joins / GROUP BY / window
+        functions over the JSONB doc — things `query()` deliberately doesn't do.
+
+        Records live in `records(rid, id, doc JSONB, expires_at, embedding)`; pull
+        fields with `doc->>'content'`, `doc->'metadata'->>'roas'`, etc. Only a
+        single SELECT/WITH statement is allowed; use `params` for values (never
+        string-format them in).
+
+            be.sql("SELECT doc->'metadata'->>'campaign' c, avg((doc->'metadata'->>'roas')::float) "
+                   "FROM records GROUP BY c ORDER BY 2 DESC")
+        """
+        stripped = query.lstrip().lower()
+        if not (stripped.startswith("select") or stripped.startswith("with")):
+            raise ValueError("sql() is read-only: only SELECT / WITH queries are allowed")
+        if ";" in query.rstrip().rstrip(";"):
+            raise ValueError("sql() runs a single statement; ';' is not allowed")
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute(query, params)
+            cols = [d.name for d in cur.description] if cur.description else []
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def close(self) -> None:
         self._pool.close()

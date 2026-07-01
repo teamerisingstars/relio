@@ -36,13 +36,24 @@ def issue_tokens(
     refresh_ttl: int = 30 * 24 * 3600,
     now: Optional[float] = None,
 ) -> dict:
-    """Issue both an access token and a longer-lived refresh token."""
+    """Issue both an access token and a longer-lived refresh token.
+
+    The refresh token carries a unique `jti` (token id) so it can be rotated and
+    revoked — see `rotate_refresh` / a revocation store on the accounts router.
+    """
+    import uuid
+
     import jwt
 
     issued = _time.time() if now is None else now
     access = issue_token(user, secret, ttl=access_ttl, now=issued)
     refresh = jwt.encode(
-        {"sub": user.id, "type": "refresh", "exp": int(issued + refresh_ttl)},
+        {
+            "sub": user.id,
+            "type": "refresh",
+            "jti": uuid.uuid4().hex,
+            "exp": int(issued + refresh_ttl),
+        },
         secret,
         algorithm="HS256",
     )

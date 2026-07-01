@@ -1,0 +1,49 @@
+name: release-reminder
+
+# Cadence nudge: once a week, if commits have piled up since the last tag, open
+# (or bump) a reminder issue. Publishing regularly is the fix for "users hit
+# already-fixed bugs" — this keeps the release cadence honest without forcing it.
+on:
+  schedule:
+    - cron: "0 9 * * MON"   # Mondays 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Count commits since last tag
+        id: count
+        run: |
+          LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+          RANGE="HEAD"; [ -n "$LAST_TAG" ] && RANGE="$LAST_TAG..HEAD"
+          N="$(git rev-list --count $RANGE)"
+          echo "n=$N"            >> "$GITHUB_OUTPUT"
+          echo "last=$LAST_TAG"  >> "$GITHUB_OUTPUT"
+      - name: Open or bump the reminder issue
+        if: steps.count.outputs.n != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          N: ${{ steps.count.outputs.n }}
+          LAST: ${{ steps.count.outputs.last }}
+        run: |
+          TITLE="🚀 Release due: $N commits since ${LAST:-the first commit}"
+          BODY="There are **$N** unreleased commits since \`${LAST:-<none>}\`.
+
+          To release: bump \`version\` in \`pyproject.toml\`, move CHANGELOG
+          \`[Unreleased]\` → the new version, then \`git tag vX.Y.Z && git push --tags\`.
+          The publish workflow does the rest."
+          EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search 'in:title Release due' --json number --jq '.[0].number' || echo '')"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi

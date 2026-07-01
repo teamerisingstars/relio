@@ -46,6 +46,19 @@ def test_provider_classes_are_llm_providers():
     assert issubclass(GeminiProvider, LLMProvider)
 
 
+def test_tool_input_schema_maps_python_types_to_json_schema():
+    from relio.server.llm.base import tool_input_schema
+
+    schema = tool_input_schema({"count": "int", "ratio": "float", "on": "bool", "name": "str", "x": "Weird"})
+    assert schema["type"] == "object"
+    props = schema["properties"]
+    assert props["count"] == {"type": "integer"}
+    assert props["ratio"] == {"type": "number"}
+    assert props["on"] == {"type": "boolean"}
+    assert props["name"] == {"type": "string"}
+    assert props["x"] == {"type": "string"}   # unknown types default to string
+
+
 def test_capabilities_are_derived_from_overrides():
     # Fake implements everything optional; a chat-only provider implements none.
     class ChatOnly(LLMProvider):

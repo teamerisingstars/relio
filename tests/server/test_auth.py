@@ -124,3 +124,32 @@ def test_extra_routers_can_opt_out_of_protection(tmp_path):
     with TestClient(app) as c:
         assert c.get("/api/custom/secret").status_code == 200  # explicitly public
     memory.close()
+
+
+def _public_login_router():
+    from fastapi import APIRouter
+
+    r = APIRouter()
+
+    @r.post("/auth/login")
+    def login():
+        return {"token": "t"}
+
+    return r
+
+
+def test_per_router_public_tuple_keeps_others_protected(tmp_path):
+    # The canonical shape: a PUBLIC auth router beside a PROTECTED app router,
+    # without disabling protection app-wide. `(router, False)` = public.
+    memory = Memory(path=str(tmp_path / "e3.db"), embedder=DeterministicEmbedder(dim=16))
+    app = create_app(
+        memory, FakeProvider(), auth=ApiKeyAuth(KEYS),
+        extra_routers=[
+            (_public_login_router(), False),   # public: login must work with no key
+            _custom_router(),                  # protected by the app-wide default
+        ],
+    )
+    with TestClient(app) as c:
+        assert c.post("/auth/login").status_code == 200        # public login works
+        assert c.get("/api/custom/secret").status_code == 401  # app router still protected
+    memory.close()

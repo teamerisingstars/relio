@@ -47,6 +47,15 @@ def test_sqlite_store_persists(tmp_path):
     assert s.get_by_email("x@y.com").id == u.id
 
 
+def test_merge_profile_is_atomic_and_recursive(tmp_path):
+    for s in (InMemoryUserStore(), SqliteUserStore(str(tmp_path / "u.db"))):
+        u = s.create("a@b.com", profile={"intake": {"q1": "a"}, "keep": 1})
+        # nested merge (q1 kept, q2 added), top-level add, and null-delete of "keep"
+        out = s.merge_profile(u.id, {"intake": {"q2": "b"}, "focus": ["x"], "keep": None})
+        assert out == {"intake": {"q1": "a", "q2": "b"}, "focus": ["x"]}
+        assert s.get_by_id(u.id).profile == out
+
+
 # --- token issued here is verified by JWTAuth -------------------------------
 
 def test_issued_token_is_verified_by_jwtauth():

@@ -1,0 +1,56 @@
+name: latest-deps
+
+# Early-warning for dependency debt: Relio pins only lower bounds (no upper
+# bounds, to avoid resolution pain). This job installs the LATEST of everything
+# weekly and runs the suite, so a breaking release from a fast-moving SDK
+# (anthropic / openai / fastapi / pydantic / google-genai) surfaces here instead
+# of in a user's install. On failure it opens/bumps an issue.
+on:
+  schedule:
+    - cron: "0 6 * * WED"   # Wednesdays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: relio_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      RELIO_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/relio_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install with latest deps
+        run: pip install --upgrade --upgrade-strategy eager -e ".[dev,postgres]"
+      - run: pip list
+      - name: Test against latest
+        id: test
+        run: pytest -q -m "integration or not integration"
+      - name: Open/bump breakage issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="⚠️ latest-deps CI failing"
+          BODY="The weekly latest-dependencies run failed — a recent release of a \
+          dependency likely broke Relio. See the run: \
+          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search 'in:title latest-deps CI failing' --json number --jq '.[0].number' || echo '')"
+          if [ -z "$EXISTING" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi

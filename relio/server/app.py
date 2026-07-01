@@ -25,7 +25,7 @@ def create_app(
     frontend_dir: Optional[str] = None,
     auth: AuthHook = anonymous_auth,
     *,
-    extra_routers: Optional[Sequence[object]] = None,
+    extra_routers: Optional[Sequence[object]] = None,  # router | (router, protected: bool)
     protect_extra_routers: bool = True,
     rate_limit: Optional[tuple[int, float]] = None,
     max_body_bytes: Optional[int] = None,
@@ -47,11 +47,15 @@ def create_app(
     # App routers must register BEFORE the SPA catch-all (mounted last), or the
     # frontend would shadow them. They're protected by the SAME `auth` hook as the
     # built-ins by default — otherwise `create_app(auth=...)` would give a false
-    # sense of security while leaving your own endpoints wide open. Opt out with
-    # `protect_extra_routers=False` for genuinely public routers.
-    extra_deps = [Depends(auth)] if protect_extra_routers else []
-    for router in extra_routers or []:
-        app.include_router(router, dependencies=extra_deps)
+    # sense of security while leaving your own endpoints wide open.
+    #
+    # Per-router control: an item may be a bare router (uses the app-wide
+    # `protect_extra_routers` default) OR a `(router, protected: bool)` tuple. Mount
+    # a PUBLIC auth router (register/login) as `(accounts_router, False)` while the
+    # rest stay protected — keeping the safe default without an app-wide opt-out.
+    for item in extra_routers or []:
+        router, protected = item if isinstance(item, tuple) else (item, protect_extra_routers)
+        app.include_router(router, dependencies=[Depends(auth)] if protected else [])
 
     app.state.relio_memory = memory
     app.state.relio_provider = provider

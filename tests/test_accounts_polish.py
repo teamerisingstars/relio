@@ -86,6 +86,70 @@ def test_refresh_issues_a_new_access_token():
     assert client.post("/auth/refresh", json={"refresh": reg["token"]}).status_code == 401
 
 
+def test_reset_request_uses_sender_and_does_not_leak_token():
+    store = InMemoryUserStore()
+    delivered = {}
+
+    def send_reset(user, token):
+        delivered[user.email] = token
+
+    client = _client(store, send_reset=send_reset)
+    client.post("/auth/register", json={"email": "a@b.com", "password": "pw12345678"})
+    r = client.post("/auth/reset-request", json={"email": "a@b.com"}).json()
+    assert r == {"ok": True}                    # token NOT in the response
+    assert delivered["a@b.com"]                 # delivered out-of-band instead
+    # and the delivered token actually works
+    ok = client.post("/auth/reset", json={"token": delivered["a@b.com"], "password": "newpw12345"})
+    assert ok.status_code == 200
+
+
+def test_refresh_rotation_and_revocation():
+    from relio.accounts import InMemoryRevocationStore
+
+    store = InMemoryUserStore()
+    revocation = InMemoryRevocationStore()
+    client = _client(store, rotate_refresh=True, revocation=revocation)
+    reg = client.post("/auth/register", json={"email": "a@b.com", "password": "pw12345678"}).json()
+
+    first = client.post("/auth/refresh", json={"refresh": reg["refresh"]})
+    assert first.status_code == 200
+    new_refresh = first.json()["refresh"]
+    assert new_refresh != reg["refresh"]                     # rotated
+
+    # the OLD refresh token is now revoked (replay blocked)
+    assert client.post("/auth/refresh", json={"refresh": reg["refresh"]}).status_code == 401
+    # the new one still works
+    assert client.post("/auth/refresh", json={"refresh": new_refresh}).status_code == 200
+
+
+def test_logout_revokes_the_refresh_token():
+    from relio.accounts import InMemoryRevocationStore
+
+    store = InMemoryUserStore()
+    client = _client(store, revocation=InMemoryRevocationStore())
+    reg = client.post("/auth/register", json={"email": "a@b.com", "password": "pw12345678"}).json()
+    assert client.post("/auth/logout", json={"refresh": reg["refresh"]}).status_code == 200
+    # after logout the refresh token is dead
+    assert client.post("/auth/refresh", json={"refresh": reg["refresh"]}).status_code == 401
+
+
+def test_patch_me_merges_profile_atomically_and_me_extra_enriches():
+    store = InMemoryUserStore()
+    client = _client(store, me_extra=lambda u: {"is_admin": u.email == "boss@b.com"})
+    reg = client.post(
+        "/auth/register",
+        json={"email": "boss@b.com", "password": "pw12345678", "profile": {"intake": {"q1": "a"}}},
+    ).json()
+    h = {"Authorization": f"Bearer {reg['token']}"}
+
+    # merge a nested field without clobbering the existing one
+    r = client.patch("/auth/me", json={"intake": {"q2": "b"}, "focus": ["x"]}, headers=h)
+    assert r.status_code == 200
+    assert r.json()["profile"] == {"intake": {"q1": "a", "q2": "b"}, "focus": ["x"]}
+    # me_extra enrichment shows up on /auth/me
+    assert client.get("/auth/me", headers=h).json()["is_admin"] is True
+
+
 def test_password_reset_flow():
     store = InMemoryUserStore()
     client = _client(store)

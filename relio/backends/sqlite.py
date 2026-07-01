@@ -122,6 +122,20 @@ class SQLiteBackend(StorageBackend):
         rows = self._db.execute("SELECT doc FROM records ORDER BY rid").fetchall()
         return [MemoryRecord.model_validate_json(r["doc"]) for r in rows]
 
+    def iter_embeddings(self):
+        import struct
+
+        rows = self._db.execute(
+            "SELECT r.doc AS doc, v.embedding AS emb FROM records r "
+            "LEFT JOIN vec_records v ON v.rowid = r.rid ORDER BY r.rid"
+        ).fetchall()
+        for row in rows:
+            record = MemoryRecord.model_validate_json(row["doc"])
+            emb = row["emb"]
+            # sqlite-vec stores little-endian float32; unpack back to a list.
+            vector = list(struct.unpack(f"<{self.dim}f", emb)) if emb is not None else None
+            yield record, vector
+
     def query(
         self,
         *,

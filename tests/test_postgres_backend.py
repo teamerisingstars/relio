@@ -21,6 +21,36 @@ pytestmark = [
 ]
 
 
+def test_sql_analytics_groups_and_guards_read_only():
+    import psycopg
+
+    from relio.backends.postgres import PostgresBackend
+    from relio.record import MemoryRecord, MemoryType
+
+    with psycopg.connect(DSN, autocommit=True) as c:
+        c.execute("DROP TABLE IF EXISTS records")
+    be = PostgresBackend(DSN, dim=4)
+    be.add(MemoryRecord(type=MemoryType.FACT, metadata={"campaign": "c1", "roas": 3.0}), None)
+    be.add(MemoryRecord(type=MemoryType.FACT, metadata={"campaign": "c1", "roas": 5.0}), None)
+    be.add(MemoryRecord(type=MemoryType.FACT, metadata={"campaign": "c2", "roas": 1.0}), None)
+
+    rows = be.sql(
+        "SELECT doc->'metadata'->>'campaign' AS campaign, "
+        "avg((doc->'metadata'->>'roas')::float) AS avg_roas "
+        "FROM records GROUP BY campaign ORDER BY avg_roas DESC"
+    )
+    assert rows[0]["campaign"] == "c1" and rows[0]["avg_roas"] == 4.0
+
+    # read-only guard: writes are rejected before hitting the DB
+    for bad in ("DELETE FROM records", "SELECT 1; DROP TABLE records"):
+        try:
+            be.sql(bad)
+            assert False, "expected ValueError"
+        except ValueError:
+            pass
+    be.close()
+
+
 def test_memory_builds_postgres_backend_from_url():
     import psycopg
 

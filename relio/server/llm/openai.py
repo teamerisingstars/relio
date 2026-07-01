@@ -4,10 +4,10 @@ import base64
 import json
 from typing import Iterator, Optional
 
-from .base import LLMProvider, Message
+from .base import Message, _LazyClientProvider, tool_input_schema
 
 
-class OpenAIProvider(LLMProvider):
+class OpenAIProvider(_LazyClientProvider):
     """OpenAI (and any OpenAI-compatible endpoint via `base_url`: Groq, Together,
     Fireworks, Ollama at http://localhost:11434/v1, local vLLM, ...)."""
 
@@ -19,17 +19,13 @@ class OpenAIProvider(LLMProvider):
         api_key: Optional[str] = None,
         client: Optional[object] = None,
     ) -> None:
-        self._model = model
+        super().__init__(model, api_key=api_key, client=client)
         self._base_url = base_url
-        self._api_key = api_key
-        self._client = client  # created lazily on first use — no key/SDK needed at boot
 
-    def _get_client(self):
-        if self._client is None:
-            import openai  # lazy: needs the `openai` extra
+    def _build_client(self):
+        import openai  # lazy: needs the `openai` extra
 
-            self._client = openai.OpenAI(base_url=self._base_url, api_key=self._api_key)
-        return self._client
+        return openai.OpenAI(base_url=self._base_url, api_key=self._api_key)
 
     def stream(self, messages: list[Message], system: str) -> Iterator[str]:
         wire = [{"role": "system", "content": system}] + [
@@ -82,10 +78,7 @@ class OpenAIProvider(LLMProvider):
                 "function": {
                     "name": t["name"],
                     "description": t.get("description", ""),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {p: {"type": "string"} for p in t.get("parameters", {})},
-                    },
+                    "parameters": tool_input_schema(t.get("parameters", {})),
                 },
             }
             for t in tools

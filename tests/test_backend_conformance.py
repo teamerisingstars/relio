@@ -127,6 +127,15 @@ def test_search_ignores_records_without_embeddings(make_backend):
     assert [r.content for r, _ in be.search([1.0, 0.0, 0.0], k=5)] == ["has_vec"]
 
 
+def test_iter_embeddings_round_trips_stored_vectors(make_backend):
+    be = make_backend(3)
+    be.add(MemoryRecord(content="vec"), [1.0, 2.0, 3.0])
+    be.add(MemoryRecord(content="novec"), None)
+    got = {r.content: emb for r, emb in be.iter_embeddings()}
+    assert got["vec"] == [1.0, 2.0, 3.0]   # stored vector recovered for migration
+    assert got["novec"] is None
+
+
 # --- structured query -------------------------------------------------------
 
 def _seed_query(be):

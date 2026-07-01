@@ -11,6 +11,31 @@ class Message(BaseModel):
     content: str
 
 
+# Map the Python type names captured in ToolSpec.parameters to JSON-schema types,
+# so the LLM receives correctly-typed tool args (ints as integers, etc.) instead
+# of everything flattened to "string".
+_JSON_SCHEMA_TYPES = {
+    "int": "integer",
+    "float": "number",
+    "number": "number",
+    "bool": "boolean",
+    "str": "string",
+    "list": "array",
+    "dict": "object",
+}
+
+
+def tool_input_schema(parameters: dict) -> dict:
+    """Build a JSON-schema `object` from a tool's `{param: type_name}` map."""
+    return {
+        "type": "object",
+        "properties": {
+            name: {"type": _JSON_SCHEMA_TYPES.get(str(tname).lower(), "string")}
+            for name, tname in parameters.items()
+        },
+    }
+
+
 class CapabilityError(RuntimeError):
     """Raised when a provider is asked for an optional capability it lacks —
     early and legible, instead of a deep `NotImplementedError` at the API call."""
@@ -74,3 +99,28 @@ class LLMProvider(ABC):
         """Transcribe speech audio to text (server-side STT). Optional capability —
         pairs with the browser Web Speech API + a typing fallback on the client."""
         raise NotImplementedError("this provider does not support transcription")
+
+
+class _LazyClientProvider(LLMProvider):
+    """Base for SDK-backed providers: stores `model`/`api_key` and builds the
+    vendor client **lazily on first use** (so importing/constructing needs no key
+    or SDK at boot). Subclasses implement `_build_client()`."""
+
+    def __init__(
+        self,
+        model: str,
+        *,
+        api_key: Optional[str] = None,
+        client: Optional[object] = None,
+    ) -> None:
+        self._model = model
+        self._api_key = api_key
+        self._client = client  # created on first use if None
+
+    def _build_client(self):
+        raise NotImplementedError
+
+    def _get_client(self):
+        if self._client is None:
+            self._client = self._build_client()
+        return self._client

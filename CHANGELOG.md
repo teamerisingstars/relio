@@ -4,6 +4,69 @@ All notable changes to Relio are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### ⚠️ Upgrade note (from 0.1.5)
+- **`extra_routers` are auth-protected by default (since 0.1.5).** If you mount a
+  **public** auth router (e.g. `/auth/register|login`) via `extra_routers`, it now
+  returns **401** — logins break. Fix: mark that router public with a tuple —
+  `extra_routers=[(accounts_router, False), my_protected_router]` — instead of
+  disabling protection app-wide. `protect_extra_routers=False` still opts the whole
+  set out. (This closes a security footgun where custom routers ran with no auth.)
+
+### Added
+- **Per-router auth control for `extra_routers`.** Each item may be a bare router
+  (uses the app-wide `protect_extra_routers` default) or a `(router, protected)`
+  tuple — so a public login router can sit beside protected app routers without an
+  app-wide opt-out.
+- **Accounts security.** `send_reset(user, token)` delivers the password-reset
+  token out-of-band and stops returning it in the response; refresh-token
+  **rotation** (`rotate_refresh`) + a **revocation store** (`InMemoryRevocationStore`,
+  pluggable) enabling `/auth/logout` and theft response; refresh tokens now carry a
+  `jti`.
+- **`store.merge_profile(user_id, partial)`** — atomic RFC-7386 profile merge
+  (nested merge, `null` deletes; SQLite uses `json_patch`), plus `PATCH /auth/me`
+  and a `me_extra(user)` enrichment hook for `GET /auth/me`.
+- **Typed tool parameters.** The exposure map now emits real JSON-schema types
+  (integer/number/boolean/string) to the LLM instead of flattening everything to
+  `string`, improving `agent.run` tool-calling accuracy.
+- **Streaming / observable `agent.run`.** New `agent.run_stream(task)` yields
+  `tool_call` / `tool_result` / `final` events for live copilot UIs;
+  `agent.run(..., persist=True)` seeds prior turns and writes back, making
+  autonomous runs conversational.
+- **Analytics SQL escape hatch.** `ai.sql(query, params)` runs a read-only
+  `SELECT`/`WITH` over the Postgres `records` table (JSONB+GIN) for
+  joins/GROUP BY/windows; `query()` stays a thin portable filter. SQLite raises.
+- **SDK generation: streaming + multipart.** `relio sdk` now emits async
+  generators for `text/event-stream` endpoints and file-upload methods for
+  `multipart/form-data` bodies (TS `FormData`, Python multipart) instead of
+  arg-less/one-shot stubs.
+- **Embedding-preserving migration.** `StorageBackend.iter_embeddings()` lets
+  `relio migrate` copy stored vectors as-is (re-embedding only when
+  missing/mismatched-dim; `reembed=True` forces). Backend conformance + integration
+  tests now run against **Postgres in CI** (pgvector service).
+- **Documentation site** (MkDocs Material) — getting-started, structured-query,
+  providers/capabilities, multi-tenancy + exposure-map, and the architecture ADRs,
+  auto-deployed to GitHub Pages. `pip install ".[docs]" && mkdocs serve`.
+- **`Memory.iter_records()` / `Memory.add_record()`** and `ExposureMap.find()` —
+  public accessors so interchange/agents no longer reach into private internals.
+
+### Changed (internal / tech-debt)
+- CI now enforces a **coverage floor** (`--cov-fail-under=85`).
+- The `dev` extra references the feature extras (`relio[ai,jwt,accounts,openai,gemini]`)
+  instead of hand-copying their pins, so versions can't drift.
+- **Friction-free releases** — `publish.yml` now triggers on a `v*` tag, guards
+  tag == version, extracts CHANGELOG notes, publishes via OIDC, and creates the
+  GitHub Release. Releasing is just bump + tag + push (see `RELEASING.md`). A
+  weekly `release-reminder` nudges when commits pile up.
+- **Latest-deps early-warning CI** — a weekly job installs the newest of every
+  dependency and runs the suite, so a breaking SDK release surfaces here (Relio
+  keeps lower-bound-only pins).
+- Providers (`claude`/`openai`/`gemini`) now share a `_LazyClientProvider` base
+  (one lazy-client implementation instead of three copies).
+- SDK generators drive off one shared `_plan_operations()` classifier (chat-skip +
+  stream/multipart detection) instead of duplicating that logic per language.
+
 ## [0.1.5] - 2026-07-01
 
 ### Added

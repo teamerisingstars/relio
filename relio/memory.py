@@ -192,6 +192,31 @@ class Memory:
             type=type, scope=scope, where=where, order_by=order_by, limit=limit, offset=offset
         )
 
+    def sql(self, query: str, params: Optional[tuple] = None) -> list[dict]:
+        """Read-only analytical SQL over the store — the escape hatch for
+        joins/GROUP BY/window functions that `query()` intentionally doesn't do.
+        **Postgres backend only** (`database_url=...`); raises otherwise."""
+        run = getattr(self._backend, "sql", None)
+        if run is None:
+            raise NotImplementedError(
+                "sql() analytics require the Postgres backend — construct "
+                "Memory(database_url='postgres://…'). SQLite has no analytics path."
+            )
+        return run(query, params)
+
+    def iter_records(self) -> list[MemoryRecord]:
+        """Every stored record, oldest first — the raw view used for export /
+        interchange. (Public counterpart to the backend's `all()`.)"""
+        return self._backend.all()
+
+    def add_record(self, record: MemoryRecord) -> MemoryRecord:
+        """Insert an already-built record as-is (preserving its id/timestamps),
+        embedding its content. The import counterpart to `iter_records()`."""
+        embedding = self._embedder.embed(record.content) if record.content else None
+        self._backend.add(record, embedding)
+        self._invalidate()
+        return record
+
     def transaction(self):
         """Group multiple writes atomically: `with memory.transaction(): ...`."""
         return self._backend.transaction()

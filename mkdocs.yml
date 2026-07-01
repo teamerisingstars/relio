@@ -1,0 +1,50 @@
+site_name: Relio
+site_description: App-first AI framework with a built-in, governed memory engine
+repo_url: https://github.com/teamerisingstars/relio
+repo_name: teamerisingstars/relio
+docs_dir: docs
+
+# Working notes (plans/specs) live under docs/ but aren't part of the site.
+exclude_docs: |
+  superpowers/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guides:
+      - Structured query: querying.md
+      - Providers & capabilities: providers.md
+      - Multi-tenancy & the exposure map: multi-tenancy.md
+  - Architecture:
+      - Overview: adr/README.md
+      - "ADR-001 · System architecture": adr/ADR-001-relio-system-architecture.md
+      - "ADR-002 · Storage strategy": adr/ADR-002-storage-backend-strategy.md
+      - "ADR-003 · Provider capabilities": adr/ADR-003-provider-capability-negotiation.md
+      - Open-core seams: open-core-seams.md

@@ -124,3 +124,10 @@ def test_add_many_rejects_bad_item_types(tmp_path):
     with pytest.raises(TypeError):
         m.add_many([123])  # not str or mapping
     m.close()
+
+
+def test_sql_analytics_is_postgres_only(tmp_path):
+    m = _mem(tmp_path)  # SQLite
+    with pytest.raises(NotImplementedError):
+        m.sql("SELECT 1")
+    m.close()

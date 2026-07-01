@@ -4,7 +4,7 @@ from __future__ import annotations
 import hmac
 import secrets
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -16,7 +16,8 @@ from .github import GitHubOAuth
 from .google import GoogleOAuth
 from .microsoft import MicrosoftOAuth
 from .passwords import hash_password, verify_password
-from .store import UserStore
+from .revocation import RevocationStore
+from .store import User, UserStore
 from .tokens import issue_reset_token, issue_token, issue_tokens, read_token
 
 _STATE_COOKIE = "relio_oauth_state"
@@ -47,6 +48,10 @@ class ResetConfirm(BaseModel):
     password: str
 
 
+class LogoutRequest(BaseModel):
+    refresh: str
+
+
 def build_accounts_router(
     store: UserStore,
     secret: str,
@@ -59,11 +64,26 @@ def build_accounts_router(
     refresh_ttl: int = 30 * 24 * 3600,
     login_rate_limit: Optional[tuple] = None,
     frontend_url: Optional[str] = None,
+    send_reset: Optional[Callable[[User, str], None]] = None,
+    rotate_refresh: bool = False,
+    revocation: Optional[RevocationStore] = None,
+    me_extra: Optional[Callable[[User], dict]] = None,
 ) -> APIRouter:
     """Batteries-included accounts: register/login (password), refresh, password
-    reset, `/auth/me`, and Google/GitHub/Microsoft OAuth with **CSRF state**.
-    Login issues a JWT that `JWTAuth(secret)` verifies. If `frontend_url` is set,
-    OAuth callbacks redirect there with `#token=…&refresh=…` (SPA-friendly)."""
+    reset, `/auth/me`, `/auth/logout`, and Google/GitHub/Microsoft OAuth with
+    **CSRF state**. Login issues a JWT that `JWTAuth(secret)` verifies.
+
+    Security options:
+    - `send_reset(user, token)` — deliver the reset token out-of-band (email). When
+      set, `/auth/reset-request` does NOT return the token in the response.
+    - `rotate_refresh` + `revocation` — issue a fresh refresh token on each refresh
+      and revoke the old one; `revocation` also powers `/auth/logout` and blocks
+      revoked tokens. (`login_rate_limit` is in-process — use a shared store for
+      multi-worker deployments.)
+    - `me_extra(user)` — dict merged into the `/auth/me` response for app enrichment.
+
+    If `frontend_url` is set, OAuth callbacks redirect there with
+    `#token=…&refresh=…` (SPA-friendly)."""
     router = APIRouter(prefix="/auth")
     auth = JWTAuth(secret)
     limiter = RateLimiter(*login_rate_limit) if login_rate_limit else None
@@ -112,13 +132,28 @@ def build_accounts_router(
             raise HTTPException(status_code=401, detail="invalid credentials")
         return _token(user)
 
-    @router.get("/me", operation_id="me")
-    def me(request: Request):
+    def _require_user(request: Request):
         scope = auth(request)
         user = store.get_by_id(scope.user) if scope.user else None
         if user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
-        return _public(user)
+        return user
+
+    @router.get("/me", operation_id="me")
+    def me(request: Request):
+        user = _require_user(request)
+        body = _public(user)
+        if me_extra is not None:
+            body.update(me_extra(user))  # app-supplied enrichment
+        return body
+
+    @router.patch("/me", operation_id="update_me")
+    def update_me(request: Request, patch: dict[str, Any]):
+        """Atomically merge `patch` into the user's profile (RFC-7386 merge: nested
+        dicts merge, `null` deletes) — no read-modify-write race."""
+        user = _require_user(request)
+        profile = store.merge_profile(user.id, patch)
+        return {"ok": True, "profile": profile}
 
     @router.post("/refresh", operation_id="refresh")
     def refresh(req: RefreshRequest):
@@ -126,17 +161,49 @@ def build_accounts_router(
             claims = read_token(req.refresh, secret, expected_type="refresh")
         except Exception:
             raise HTTPException(status_code=401, detail="invalid refresh token")
+        jti = claims.get("jti")
+        if revocation is not None and jti and revocation.is_revoked(jti):
+            raise HTTPException(status_code=401, detail="refresh token revoked")
         user = store.get_by_id(claims["sub"])
         if user is None:
             raise HTTPException(status_code=401, detail="unknown user")
+        if rotate_refresh:
+            # New refresh each time; invalidate the old one so a stolen/leaked
+            # refresh token can't be replayed after the legit client rotates.
+            if revocation is not None and jti:
+                revocation.revoke(jti, int(claims.get("exp", 0)))
+            t = _tokens(user)
+            return {"token": t["access"], "refresh": t["refresh"], "user_id": user.id}
         return {"token": issue_token(user, secret, ttl=token_ttl), "user_id": user.id}
+
+    @router.post("/logout", operation_id="logout")
+    def logout(req: LogoutRequest):
+        """Revoke a refresh token (real server-side logout). Requires a revocation
+        store; otherwise there's nothing to revoke against."""
+        if revocation is None:
+            raise HTTPException(status_code=400, detail="logout requires a revocation store")
+        try:
+            claims = read_token(req.refresh, secret, expected_type="refresh")
+        except Exception:
+            raise HTTPException(status_code=401, detail="invalid refresh token")
+        jti = claims.get("jti")
+        if jti:
+            revocation.revoke(jti, int(claims.get("exp", 0)))
+        return {"ok": True}
 
     @router.post("/reset-request", operation_id="reset_request")
     def reset_request(req: ResetRequest):
         user = store.get_by_email(req.email)
         if user is None:  # don't reveal whether the email exists
             return {"ok": True}
-        return {"ok": True, "reset_token": issue_reset_token(user, secret)}
+        token = issue_reset_token(user, secret)
+        if send_reset is not None:
+            # Deliver out-of-band (email). NEVER echo the token in the response —
+            # otherwise any caller could reset any account's password.
+            send_reset(user, token)
+            return {"ok": True}
+        # Dev stub only (no sender configured): return the token for local testing.
+        return {"ok": True, "reset_token": token}
 
     @router.post("/reset", operation_id="reset_password")
     def reset_password(req: ResetConfirm):

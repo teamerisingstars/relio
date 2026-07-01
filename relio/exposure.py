@@ -90,6 +90,10 @@ class ExposureMap:
             raise KeyError(f"no such tool: {name!r}")
         return self._tools[name]
 
+    def find(self, name: str) -> Optional[ToolSpec]:
+        """Return the tool's spec, or None if it isn't registered."""
+        return self._tools.get(name)
+
     def call(self, name: str, *, scope: Any = None, confirm: bool = False, **kwargs: Any) -> Any:
         spec = self.get(name)
         if spec.destructive and not confirm:

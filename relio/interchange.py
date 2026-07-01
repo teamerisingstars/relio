@@ -9,7 +9,7 @@ from .record import MemoryRecord, Scope
 
 def export_records(memory: Memory) -> str:
     """Serialize all records to a JSON-lines string (the portable interchange form)."""
-    return "\n".join(r.model_dump_json() for r in memory._backend.all())
+    return "\n".join(r.model_dump_json() for r in memory.iter_records())
 
 
 def import_records(memory: Memory, blob: str) -> int:
@@ -19,21 +19,16 @@ def import_records(memory: Memory, blob: str) -> int:
         line = line.strip()
         if not line:
             continue
-        record = MemoryRecord.model_validate_json(line)
-        embedding = memory._embedder.embed(record.content) if record.content else None
-        memory._backend.add(record, embedding)
+        memory.add_record(MemoryRecord.model_validate_json(line))
         count += 1
     return count
 
 
 def import_record_objects(memory: Memory, records: list[MemoryRecord]) -> int:
     """Load already-parsed records (e.g. from `from_mem0`) into a Memory. Returns count."""
-    count = 0
     for record in records:
-        embedding = memory._embedder.embed(record.content) if record.content else None
-        memory._backend.add(record, embedding)
-        count += 1
-    return count
+        memory.add_record(record)
+    return len(records)
 
 
 def from_mem0(rows: list[dict[str, Any]]) -> tuple[list[MemoryRecord], int]:

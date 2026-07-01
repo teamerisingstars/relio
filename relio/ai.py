@@ -111,6 +111,11 @@ class RelioAI:
             type=type, scope=scope, where=where, order_by=order_by, limit=limit, offset=offset
         )
 
+    def sql(self, query: str, params: Optional[tuple] = None) -> list[dict]:
+        """Read-only analytical SQL over the store (Postgres backend only) — for
+        joins/GROUP BY/windows beyond `query()`. See `Memory.sql`."""
+        return self.memory.sql(query, params)
+
     def transaction(self):
         return self.memory.transaction()
 

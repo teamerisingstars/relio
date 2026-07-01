@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Iterator, Optional
 
-from .base import LLMProvider, Message
+from .base import Message, _LazyClientProvider, tool_input_schema
 
 
-class GeminiProvider(LLMProvider):
+class GeminiProvider(_LazyClientProvider):
     """Google Gemini via the google-genai SDK."""
 
     def __init__(
@@ -15,16 +15,12 @@ class GeminiProvider(LLMProvider):
         api_key: Optional[str] = None,
         client: Optional[object] = None,
     ) -> None:
-        self._model = model
-        self._api_key = api_key
-        self._client = client  # created lazily on first use — no key/SDK needed at boot
+        super().__init__(model, api_key=api_key, client=client)
 
-    def _get_client(self):
-        if self._client is None:
-            from google import genai  # lazy: needs the `gemini` extra
+    def _build_client(self):
+        from google import genai  # lazy: needs the `gemini` extra
 
-            self._client = genai.Client(api_key=self._api_key) if self._api_key else genai.Client()
-        return self._client
+        return genai.Client(api_key=self._api_key) if self._api_key else genai.Client()
 
     def stream(self, messages: list[Message], system: str) -> Iterator[str]:
         contents = "\n".join(
@@ -47,10 +43,7 @@ class GeminiProvider(LLMProvider):
             types.FunctionDeclaration(
                 name=t["name"],
                 description=t.get("description", ""),
-                parameters={
-                    "type": "object",
-                    "properties": {p: {"type": "string"} for p in t.get("parameters", {})},
-                },
+                parameters=tool_input_schema(t.get("parameters", {})),
             )
             for t in tools
         ]

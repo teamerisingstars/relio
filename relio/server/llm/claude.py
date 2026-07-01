@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import Iterator, Optional
 
-from .base import LLMProvider, Message
+from .base import Message, _LazyClientProvider, tool_input_schema
 
 
-class ClaudeProvider(LLMProvider):
+class ClaudeProvider(_LazyClientProvider):
     """Streams replies from Claude via the Anthropic SDK."""
 
     def __init__(
@@ -15,17 +15,13 @@ class ClaudeProvider(LLMProvider):
         api_key: Optional[str] = None,
         client: Optional[object] = None,
     ) -> None:
-        self._model = model
-        self._api_key = api_key
-        self._client = client  # created lazily on first use — no API key needed at boot
+        super().__init__(model, api_key=api_key, client=client)
 
-    def _get_client(self):
-        if self._client is None:
-            import anthropic
+    def _build_client(self):
+        import anthropic
 
-            # api_key=None → the SDK falls back to ANTHROPIC_API_KEY (env).
-            self._client = anthropic.Anthropic(api_key=self._api_key)
-        return self._client
+        # api_key=None → the SDK falls back to ANTHROPIC_API_KEY (env).
+        return anthropic.Anthropic(api_key=self._api_key)
 
     def stream(self, messages: list[Message], system: str) -> Iterator[str]:
         wire = [
@@ -72,10 +68,7 @@ class ClaudeProvider(LLMProvider):
             {
                 "name": t["name"],
                 "description": t.get("description", ""),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {p: {"type": "string"} for p in t.get("parameters", {})},
-                },
+                "input_schema": tool_input_schema(t.get("parameters", {})),
             }
             for t in tools
         ]

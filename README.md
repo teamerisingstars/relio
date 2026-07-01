@@ -3,6 +3,10 @@
 [![PyPI](https://img.shields.io/pypi/v/relio.svg)](https://pypi.org/project/relio/)
 [![Python](https://img.shields.io/pypi/pyversions/relio.svg)](https://pypi.org/project/relio/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://teamerisingstars.github.io/relio/)
+
+**📖 Documentation:** <https://teamerisingstars.github.io/relio/> — getting started,
+querying, providers, multi-tenancy, and the architecture ADRs.
 
 **An app-first AI framework.** Build a normal FastAPI + React app with your own
 data, and *call AI in* where you need it — memory, retrieval, agents, document
@@ -21,9 +25,10 @@ extraction, and MCP — as one in-process component, not a pile of services.
 - **Batteries for building** — scaffolds (web/mobile/desktop), generated SDKs, and
   a dev harness that won't let code land without a test and a doc.
 
-> Status: early / pre-release (`0.1.x`). The engine, server, SDKs, agents,
-> extraction, and CLI are tested. Postgres paths and the vision/extraction model
-> call are integration-gated (need a live DB / API). See [Status](#status).
+> Status: `0.1.x`, published on PyPI. The engine, server, SDKs, agents,
+> extraction, accounts, and CLI are covered by **260+ tests** (SQLite + Postgres
+> run in CI). Only the live vision/extraction model call is API-gated. See
+> [Status](#status).
 
 ---
 
@@ -57,7 +62,7 @@ Optional extras (combine, e.g. `.[server,postgres]`):
 git clone https://github.com/teamerisingstars/relio.git
 cd relio
 pip install -e ".[dev]"
-pytest            # 170+ tests
+pytest            # 260+ tests
 ```
 
 ---
@@ -180,11 +185,12 @@ Scaffold one with `relio ai new <name>`.
 | `relio dev` | run backend + frontend dev servers on one URL |
 | `relio build` | build the React frontend |
 | `relio serve [--port]` | serve API + built frontend on one port |
-| `relio sdk [--out]` | generate the TS + Python SDKs from the API |
+| `relio sdk [--out] [--app module:attr]` | generate the TS + Python SDKs from **your** app's API |
+| `relio migrate --from <src> --to <dst>` | copy a memory store between backends (SQLite ↔ Postgres) |
 | `relio develop ["<task>"]` | drive the Claude Code CLI to build a feature (feeds gate gaps to it) |
 | `relio test [--coverage --min N]` | run the test suites (optionally enforce coverage) |
 | `relio check` | **governance gate** — fail if any module lacks a test and a doc |
-| `relio dockerfile` / `relio deploy` | production Dockerfile / build image |
+| `relio dockerfile` / `relio deploy [--name]` | production Dockerfile / build image |
 
 ### The governance gate
 A scaffolded app ships a `CLAUDE.md` (conventions), `docs/`, `tests/`, and a
@@ -238,7 +244,7 @@ relio/            # the framework package
   cli/            # new/ai new/dev/serve/sdk/develop/test/check
   templates/      # web (React), mobile (Expo), desktop (Tauri)
 docs/superpowers/specs/   # design specs (architecture v2 + every feature)
-tests/            # 170+ tests
+tests/            # 260+ tests
 ```
 
 Start with [`docs/superpowers/specs/2026-06-30-relio-architecture-v2-app-first.md`](docs/superpowers/specs/2026-06-30-relio-architecture-v2-app-first.md)
@@ -251,7 +257,7 @@ for the full architecture.
 | Area | State |
 |------|-------|
 | Engine, server, auth (API-key/JWT), graph, query, agents, **AIApp**, **security**, SDK gen, scaffolds, CLI, dev harness | ✅ tested |
-| Postgres + pgvector (backend, pooling, JSONB) | ⚙️ implemented; integration-gated (`RELIO_TEST_DATABASE_URL`, `pytest -m integration`) |
+| Postgres + pgvector (backend, pooling, JSONB) | ✅ tested in CI (pgvector service) + locally via `RELIO_TEST_DATABASE_URL` |
 | Claude vision/extraction call | ⚙️ implemented; untested without an API key (the offline fake path is tested) |
 | Generated TS SDK / mobile / desktop apps | ⚙️ scaffolded + structurally tested; not compiled in CI |
 

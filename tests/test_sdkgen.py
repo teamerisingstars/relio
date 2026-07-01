@@ -60,6 +60,35 @@ def test_generate_all_returns_four_files(openapi):
     assert all(content.strip() for content in files.values())
 
 
+def test_sdk_generates_streaming_and_multipart_methods():
+    openapi = {
+        "paths": {
+            "/api/events": {"get": {
+                "operationId": "events",
+                "responses": {"200": {"content": {"text/event-stream": {}}}},
+            }},
+            "/api/upload": {"post": {
+                "operationId": "ingest_creative_file",
+                "requestBody": {"content": {"multipart/form-data": {"schema": {"properties": {"file": {}}}}}},
+                "responses": {"200": {"content": {"application/json": {"schema": {}}}}},
+            }},
+        }
+    }
+    ts = sdkgen.generate_ts_client(openapi)
+    py = sdkgen.generate_py_client(openapi)
+
+    # streaming → generators, not one-shot requests
+    assert "async *events(): AsyncGenerator<string>" in ts and "this._stream(" in ts
+    assert "def events(self) -> Iterator[str]:" in py and "self._stream(" in py
+
+    # multipart → a real file-upload method (was arg-less before)
+    assert "ingestCreativeFile(form: FormData)" in ts and "this._requestForm(" in ts
+    assert "def ingest_creative_file(self, files:" in py and "self._request_multipart(" in py
+
+    # the generated Python must at least compile
+    compile(py, "client.py", "exec")
+
+
 def test_cli_sdk_introspects_the_users_app_including_custom_endpoints(tmp_path, monkeypatch):
     # The whole point: `relio sdk` must read the USER's app.py, so custom
     # endpoints show up in the generated client (bug: it used a throwaway app).

@@ -10,6 +10,7 @@ from .github import GitHubOAuth
 from .google import GoogleOAuth
 from .microsoft import MicrosoftOAuth
 from .passwords import hash_password, verify_password
+from .revocation import InMemoryRevocationStore, RevocationStore
 from .routes import build_accounts_router
 from .store import InMemoryUserStore, SqliteUserStore, User, UserStore
 from .tokens import issue_reset_token, issue_token, issue_tokens, read_token
@@ -29,4 +30,6 @@ __all__ = [
     "GitHubOAuth",
     "MicrosoftOAuth",
     "build_accounts_router",
+    "RevocationStore",
+    "InMemoryRevocationStore",
 ]

@@ -71,10 +71,27 @@ ai.remember_many([
 ])
 ```
 
-## When to reach past `query()`
+## When to reach past `query()` — `sql()` (Postgres)
 
 `query()` is for filtering/ranking records by a handful of metadata fields. For
-heavy analytical workloads — joins, GROUP BY, window functions — use the Postgres
-backend and query the `records` table (JSONB + GIN) directly with SQL. `query()`
-is deliberately a thin, portable filter, not an analytics engine.
+heavy analytical workloads — joins, GROUP BY, window functions — use the **read-only
+`sql()` escape hatch** on the Postgres backend. `query()` stays a thin, portable
+filter; `sql()` is where analytics live.
+
+```python
+ai = RelioAI(memory=Memory(database_url="postgres://…"))
+
+rows = ai.sql(
+    "SELECT doc->'metadata'->>'campaign' AS campaign, "
+    "       avg((doc->'metadata'->>'roas')::float) AS avg_roas "
+    "FROM records GROUP BY campaign ORDER BY avg_roas DESC"
+)
+# [{"campaign": "c1", "avg_roas": 4.0}, ...]
+```
+
+Records live in `records(rid, id, doc JSONB, expires_at, embedding)`; pull fields
+with `doc->>'content'`, `doc->'metadata'->>'roas'`, etc. (the `doc` column is
+GIN-indexed). `sql()` allows a **single read-only** `SELECT`/`WITH` statement and
+takes `params` for values — it is not available on SQLite (raises
+`NotImplementedError`), which has no analytics path.
 ```

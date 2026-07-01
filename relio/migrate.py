@@ -2,12 +2,11 @@
 """Move a memory store from one backend to another (e.g. SQLite -> Postgres).
 
 Records carry their own ids, scope, metadata, relations, and timestamps, so a
-migration is a faithful copy of those. Vectors are **re-embedded** with a single
-embedder rather than copied byte-for-byte: the two vector stores (`sqlite-vec`
-serialized float32 vs. `pgvector`) don't share a wire format, and re-embedding
-with a consistent embedder yields an equivalent vector space on the destination.
-Use `embed=False` for a structured-only copy (no vectors; recall won't work until
-re-embedded). See ADR-002.
+migration is a faithful copy of those. Vectors are **preserved** when the source
+exposes them (`StorageBackend.iter_embeddings`) and their dimension matches; any
+record whose vector is missing or a different dimension is re-embedded. Use
+`reembed=True` to force re-embedding (e.g. when switching embedder/model) or
+`embed=False` for a structured-only copy. See ADR-002.
 """
 from __future__ import annotations
 
@@ -35,33 +34,47 @@ def migrate_records(
     embedder: Embedder,
     *,
     embed: bool = True,
-    batch_size: int = 256,
+    reembed: bool = False,
     progress: Optional[Callable[[int, int], None]] = None,
 ) -> int:
     """Copy every record from `source` into `dest`, preserving id/scope/metadata/
-    relations/timestamps. Content-bearing records are re-embedded with `embedder`
-    (unless `embed=False`). `progress(done, total)` is called after each record.
-    Returns the number of records migrated."""
-    records = source.all()
+    relations/timestamps.
+
+    Vectors are **preserved when possible**: a stored embedding of matching
+    dimension is copied as-is. Records whose vector is missing or a different
+    dimension are re-embedded with `embedder`. Options:
+
+    - `embed=False` — structured-only copy (no vectors at all).
+    - `reembed=True` — force re-embedding even where a stored vector exists (use
+      when changing embedder/model).
+
+    `progress(done, total)` is called after each record. Returns the count."""
+    records: list = []
+    embeddings: list = []          # final vector (or None) per record, by index
+    need_embed: list = []          # (index, content) for records to re-embed
+    for rec, stored in source.iter_embeddings():
+        idx = len(records)
+        records.append(rec)
+        embeddings.append(None)
+        if not embed:
+            continue
+        reusable = (
+            stored is not None and not reembed and len(stored) == embedder.dim
+        )
+        if reusable:
+            embeddings[idx] = stored
+        elif rec.content:
+            need_embed.append((idx, rec.content))
+
+    if need_embed:  # one batch for everything that actually needs (re-)embedding
+        vectors = embedder.embed_batch([c for _, c in need_embed])
+        for (idx, _), vector in zip(need_embed, vectors):
+            embeddings[idx] = vector
+
     total = len(records)
-    done = 0
     with dest.transaction():
-        for start in range(0, total, batch_size):
-            chunk = records[start : start + batch_size]
-            if embed:
-                # Batch-embed only the content-bearing records in this chunk.
-                to_embed = [(i, r) for i, r in enumerate(chunk) if r.content]
-                vectors = (
-                    embedder.embed_batch([r.content for _, r in to_embed])
-                    if to_embed
-                    else []
-                )
-                embedding_by_index = {i: v for (i, _), v in zip(to_embed, vectors)}
-            else:
-                embedding_by_index = {}
-            for i, rec in enumerate(chunk):
-                dest.add(rec, embedding_by_index.get(i))
-                done += 1
-                if progress is not None:
-                    progress(done, total)
-    return done
+        for idx, rec in enumerate(records):
+            dest.add(rec, embeddings[idx])
+            if progress is not None:
+                progress(idx + 1, total)
+    return total

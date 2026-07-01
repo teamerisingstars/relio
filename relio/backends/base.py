@@ -49,6 +49,16 @@ class StorageBackend(ABC):
         History relies on this ordering; backends must preserve it.
         """
 
+    def iter_embeddings(self):
+        """Yield `(record, embedding | None)` for every record, oldest first.
+
+        Default: no stored vector (callers re-embed). Backends override to expose
+        their stored vectors so `relio migrate` can preserve them instead of
+        re-embedding. See ADR-002.
+        """
+        for record in self.all():
+            yield record, None
+
     @abstractmethod
     def query(
         self,

@@ -7,6 +7,7 @@ produces — no external codegen toolchain.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 # --------------------------------------------------------------------------- #
@@ -120,6 +121,37 @@ export class RelioClient {{
     return text ? JSON.parse(text) : null;
   }}
 
+  private async _requestForm(method: string, path: string, form: FormData): Promise<any> {{
+    // multipart/form-data: let the browser set the Content-Type + boundary.
+    const res = await fetch(this.baseUrl + path, {{ method, headers: this._headers(false), body: form }});
+    if (!res.ok) throw new Error(`Relio ${{method}} ${{path}} -> ${{res.status}}`);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }}
+
+  private async *_stream(method: string, path: string, body?: any): AsyncGenerator<string> {{
+    const res = await fetch(this.baseUrl + path, {{
+      method, headers: this._headers(body !== undefined),
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }});
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {{
+      const {{ done, value }} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {{ stream: true }});
+      let i: number;
+      while ((i = buf.indexOf("\\n\\n")) !== -1) {{
+        const f = buf.slice(0, i).trim();
+        buf = buf.slice(i + 2);
+        if (!f.startsWith("data:")) continue;
+        const p = JSON.parse(f.slice(f.indexOf(":") + 1).trim());
+        yield (p.delta ?? p.text ?? "");
+      }}
+    }}
+  }}
+
   async *chat(body: ChatRequest): AsyncGenerator<string> {{
     const res = await fetch(this.baseUrl + "/api/chat", {{
       method: "POST",
@@ -161,35 +193,111 @@ def _op_inputs(path: str, op: dict) -> tuple[list[str], str | None, list[dict]]:
     return path_params, body_type, query_params
 
 
+def _is_streaming(op: dict) -> bool:
+    """True if the endpoint streams Server-Sent Events (declares a
+    `text/event-stream` success response) — emit a generator instead of a
+    one-shot request."""
+    for code in ("200", "201"):
+        content = op.get("responses", {}).get(code, {}).get("content", {})
+        if "text/event-stream" in content:
+            return True
+    return False
+
+
+def _multipart_fields(op: dict) -> list[str] | None:
+    """If the request body is `multipart/form-data`, return its field names
+    (files + form fields); else None. Drives file-upload method generation."""
+    rb = op.get("requestBody")
+    if not rb:
+        return None
+    schema = rb.get("content", {}).get("multipart/form-data", {}).get("schema")
+    if schema is None:
+        return None
+    return list(schema.get("properties", {}).keys())
+
+
+@dataclass
+class _ClientOp:
+    """A language-agnostic plan for one endpoint. Both client generators classify
+    operations once here, then only differ in how they render each `kind`."""
+    op_id: str
+    method: str            # upper-cased HTTP verb
+    path: str
+    path_params: list[str]
+    body_type: str | None
+    query_params: list[dict]
+    kind: str              # "plain" | "stream" | "multipart"
+    success: dict | None   # success-response schema
+
+
+def _plan_operations(openapi: dict) -> list[_ClientOp]:
+    """Walk the OpenAPI paths into `_ClientOp`s, skipping the hand-written chat
+    method. The single source of the chat-skip + multipart/stream classification."""
+    plans: list[_ClientOp] = []
+    for path, item in openapi.get("paths", {}).items():
+        for method, op in item.items():
+            op_id = op.get("operationId")
+            if not op_id or op_id == "chat":  # chat is hand-written in the preamble
+                continue
+            path_params, body_type, query_params = _op_inputs(path, op)
+            if _multipart_fields(op) is not None:
+                kind = "multipart"
+            elif _is_streaming(op):
+                kind = "stream"
+            else:
+                kind = "plain"
+            plans.append(
+                _ClientOp(
+                    op_id=op_id, method=method.upper(), path=path,
+                    path_params=path_params, body_type=body_type,
+                    query_params=query_params, kind=kind, success=_success_response(op),
+                )
+            )
+    return plans
+
+
 def generate_ts_client(openapi: dict) -> str:
     schemas = openapi.get("components", {}).get("schemas", {})
     imports = ", ".join(sorted(schemas.keys()))
     out = [_TS_CLIENT_PREAMBLE.format(imports=imports)]
-    for path, item in openapi.get("paths", {}).items():
-        for method, op in item.items():
-            op_id = op.get("operationId")
-            if not op_id or op_id == "chat":
-                continue
-            path_params, body_type, query_params = _op_inputs(path, op)
-            args: list[str] = [f"{_camel(p)}: string" for p in path_params]
-            if body_type:
-                args.append(f"body: {body_type}")
-            if query_params:
-                fields = []
-                for q in query_params:
-                    opt = "" if q.get("required") else "?"
-                    fields.append(f"{q['name']}{opt}: {_ts_type(q.get('schema'))}")
+    for op in _plan_operations(openapi):
+        name = _camel(op.op_id)
+        url = op.path
+        for p in op.path_params:
+            url = url.replace("{" + p + "}", "${" + _camel(p) + "}")
+        path_args = [f"{_camel(p)}: string" for p in op.path_params]
+        ret = _ts_type(op.success)
+
+        if op.kind == "multipart":
+            args = path_args + ["form: FormData"]
+            out.append(
+                f"  async {name}({', '.join(args)}): Promise<{ret}> {{\n"
+                f'    return this._requestForm("{op.method}", `{url}`, form);\n'
+                f"  }}\n"
+            )
+        elif op.kind == "stream":
+            args = path_args + ([f"body: {op.body_type}"] if op.body_type else [])
+            body_arg = "body" if op.body_type else "undefined"
+            out.append(
+                f"  async *{name}({', '.join(args)}): AsyncGenerator<string> {{\n"
+                f'    yield* this._stream("{op.method}", `{url}`, {body_arg});\n'
+                f"  }}\n"
+            )
+        else:
+            args = list(path_args)
+            if op.body_type:
+                args.append(f"body: {op.body_type}")
+            if op.query_params:
+                fields = [
+                    f"{q['name']}{'' if q.get('required') else '?'}: {_ts_type(q.get('schema'))}"
+                    for q in op.query_params
+                ]
                 args.append("query: { " + "; ".join(fields) + " }")
-            url = path
-            for p in path_params:
-                url = url.replace("{" + p + "}", "${" + _camel(p) + "}")
-            ret = _ts_type(_success_response(op))
-            call = [f'"{method.upper()}"', f"`{url}`"]
-            call.append("body" if body_type else "undefined")
-            if query_params:
+            call = [f'"{op.method}"', f"`{url}`", "body" if op.body_type else "undefined"]
+            if op.query_params:
                 call.append("query")
             out.append(
-                f"  async {_camel(op_id)}({', '.join(args)}): Promise<{ret}> {{\n"
+                f"  async {name}({', '.join(args)}): Promise<{ret}> {{\n"
                 f"    return this._request({', '.join(call)});\n"
                 f"  }}\n"
             )
@@ -268,7 +376,8 @@ from __future__ import annotations
 import json
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Iterator, Optional
+import uuid
+from typing import Any, Dict, Iterator, Optional, Tuple, Union
 
 
 class RelioClient:
@@ -296,6 +405,48 @@ class RelioClient:
             text = resp.read().decode()
         return json.loads(text) if text else None
 
+    def _stream(self, method: str, path: str, body: Any = None) -> Iterator[str]:
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(
+            self.base_url + path, data=data, headers=self._headers(body is not None), method=method
+        )
+        with urllib.request.urlopen(req) as resp:
+            for raw in resp:
+                line = raw.decode().strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = json.loads(line[len("data:"):].strip())
+                chunk = payload.get("delta", payload.get("text"))
+                if chunk is not None:
+                    yield chunk
+
+    def _request_multipart(self, method: str, path: str,
+                           files: Dict[str, Union[str, Tuple[str, bytes]]]) -> Any:
+        """Post multipart/form-data. Each value is a plain string (a form field) or
+        a (filename, bytes) tuple (a file part)."""
+        boundary = "----relio" + uuid.uuid4().hex
+        parts = []
+        for name, val in files.items():
+            parts.append(b"--" + boundary.encode() + b"\\r\\n")
+            if isinstance(val, tuple):
+                filename, content = val
+                parts.append(
+                    f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\\r\\n\\r\\n'.encode()
+                )
+                parts.append(content if isinstance(content, bytes) else str(content).encode())
+            else:
+                parts.append(f'Content-Disposition: form-data; name="{name}"\\r\\n\\r\\n'.encode())
+                parts.append(str(val).encode())
+            parts.append(b"\\r\\n")
+        parts.append(b"--" + boundary.encode() + b"--\\r\\n")
+        body = b"".join(parts)
+        headers = dict(self._headers(False))
+        headers["Content-Type"] = "multipart/form-data; boundary=" + boundary
+        req = urllib.request.Request(self.base_url + path, data=body, headers=headers, method=method)
+        with urllib.request.urlopen(req) as resp:
+            text = resp.read().decode()
+        return json.loads(text) if text else None
+
     def chat(self, body: "ChatRequest") -> Iterator[str]:
         data = json.dumps(body).encode()
         req = urllib.request.Request(
@@ -314,32 +465,37 @@ class RelioClient:
 
 def generate_py_client(openapi: dict) -> str:
     out = [_PY_CLIENT_PREAMBLE]
-    for path, item in openapi.get("paths", {}).items():
-        for method, op in item.items():
-            op_id = op.get("operationId")
-            if not op_id or op_id == "chat":
-                continue
-            path_params, body_type, query_params = _op_inputs(path, op)
-            args = ["self"] + [f"{p}: str" for p in path_params]
-            if body_type:
-                args.append(f'body: "{body_type}"')
-            for q in query_params:
-                qt = _py_type(q.get("schema"))
-                if q.get("required"):
-                    args.append(f"{q['name']}: {qt}")
-                else:
-                    args.append(f"{q['name']}: {qt} = None")
-            url_expr = '"' + path + '"'
-            if path_params:
-                url_expr = 'f"' + path + '"'
-            call = [f'"{method.upper()}"', url_expr]
-            call.append("body=body" if body_type else "body=None")
-            if query_params:
-                qdict = ", ".join(f'"{q["name"]}": {q["name"]}' for q in query_params)
-                call.append("query={" + qdict + "}")
-            ret = _py_type(_success_response(op))
+    for op in _plan_operations(openapi):
+        url_expr = ('f"' + op.path + '"') if op.path_params else ('"' + op.path + '"')
+        path_args = ["self"] + [f"{p}: str" for p in op.path_params]
+        ret = _py_type(op.success)
+
+        if op.kind == "multipart":
+            args = path_args + ["files: Dict[str, Union[str, Tuple[str, bytes]]]"]
             out.append(
-                f"    def {op_id}({', '.join(args)}) -> {ret}:\n"
+                f"    def {op.op_id}({', '.join(args)}) -> {ret}:\n"
+                f'        return self._request_multipart("{op.method}", {url_expr}, files)\n'
+            )
+        elif op.kind == "stream":
+            args = path_args + ([f'body: "{op.body_type}"'] if op.body_type else [])
+            body_arg = "body" if op.body_type else "None"
+            out.append(
+                f"    def {op.op_id}({', '.join(args)}) -> Iterator[str]:\n"
+                f'        yield from self._stream("{op.method}", {url_expr}, {body_arg})\n'
+            )
+        else:
+            args = list(path_args)
+            if op.body_type:
+                args.append(f'body: "{op.body_type}"')
+            for q in op.query_params:
+                qt = _py_type(q.get("schema"))
+                args.append(f"{q['name']}: {qt}" if q.get("required") else f"{q['name']}: {qt} = None")
+            call = [f'"{op.method}"', url_expr, "body=body" if op.body_type else "body=None"]
+            if op.query_params:
+                qdict = ", ".join(f'"{q["name"]}": {q["name"]}' for q in op.query_params)
+                call.append("query={" + qdict + "}")
+            out.append(
+                f"    def {op.op_id}({', '.join(args)}) -> {ret}:\n"
                 f"        return self._request({', '.join(call)})\n"
             )
     return "\n".join(out)

@@ -39,9 +39,26 @@ class UserStore(Protocol):
 
     def set_profile(self, user_id: str, profile: dict) -> None: ...
 
+    def merge_profile(self, user_id: str, partial: dict) -> Optional[dict]: ...
+
 
 def _new_id() -> str:
     return "usr_" + uuid.uuid4().hex
+
+
+def _deep_merge(base: dict, partial: dict) -> dict:
+    """Recursively merge `partial` into `base` (RFC 7386 / JSON-merge-patch style):
+    nested dicts merge key-by-key; a `None` value deletes that key; everything else
+    overwrites. Returns a new dict."""
+    out = dict(base)
+    for k, v in partial.items():
+        if v is None:
+            out.pop(k, None)
+        elif isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
 
 
 class InMemoryUserStore:
@@ -74,6 +91,13 @@ class InMemoryUserStore:
         user = self._by_id.get(user_id)
         if user is not None:
             user.profile = dict(profile or {})
+
+    def merge_profile(self, user_id, partial):
+        user = self._by_id.get(user_id)
+        if user is None:
+            return None
+        user.profile = _deep_merge(user.profile, partial or {})
+        return dict(user.profile)
 
 
 class SqliteUserStore:
@@ -133,6 +157,17 @@ class SqliteUserStore:
             "UPDATE users SET profile = ? WHERE id = ?", (json.dumps(profile or {}), user_id)
         )
         self._db.commit()
+
+    def merge_profile(self, user_id, partial):
+        # json_patch is RFC-7386 merge (recursive; null deletes) applied in a single
+        # atomic UPDATE — no read-modify-write race between concurrent callers.
+        self._db.execute(
+            "UPDATE users SET profile = json_patch(profile, ?) WHERE id = ?",
+            (json.dumps(partial or {}), user_id),
+        )
+        self._db.commit()
+        user = self.get_by_id(user_id)
+        return None if user is None else dict(user.profile)
 
     @staticmethod
     def _row(row) -> Optional[User]:

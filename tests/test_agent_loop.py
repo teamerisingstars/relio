@@ -41,6 +41,38 @@ def test_agent_run_blocks_destructive_tools(tmp_path):
     ai.close()
 
 
+def test_run_stream_yields_tool_and_final_events(tmp_path):
+    ai = _ai(tmp_path)
+
+    @ai.tool
+    def get_status() -> str:
+        return "in_stock"
+
+    agent = ai.agent("ops", tools=["get_status"])
+    events = list(agent.run_stream("check status"))
+    kinds = [e["type"] for e in events]
+    assert "tool_call" in kinds and "tool_result" in kinds
+    assert kinds[-1] == "final"                       # final is always last
+    assert events[-1]["text"] == "done"
+    # tool_call carries the name; tool_result carries the output
+    tc = next(e for e in events if e["type"] == "tool_call")
+    tr = next(e for e in events if e["type"] == "tool_result")
+    assert tc["name"] == "get_status" and tr["output"] == "in_stock"
+    ai.close()
+
+
+def test_run_persist_records_turns_for_multi_turn(tmp_path):
+    ai = _ai(tmp_path)
+    agent = ai.agent("copilot")
+    agent.run("first question", persist=True)
+    # the task + final answer were written to the agent's own space
+    turns = ai.memory.history(agent.space, limit=10)
+    roles = [t.metadata.get("role") for t in turns]
+    assert "user" in roles and "assistant" in roles
+    assert any("first question" in t.content for t in turns)
+    ai.close()
+
+
 def test_agent_run_requires_provider(tmp_path):
     m = Memory(path=str(tmp_path / "np.db"), embedder=DeterministicEmbedder(dim=16))
     ai = RelioAI(memory=m)  # no provider
