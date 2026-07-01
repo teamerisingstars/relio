@@ -60,12 +60,13 @@ the **exposure map**; agents are **bounded contexts**.
 
 ```
 relio/ai.py            # RelioAI seam
+relio/aiapp/           # AIApp — the AI-first app framework (app.py, routes.py)
 relio/exposure.py      # exposure map (tool registry + field allowlist)
 relio/agents.py        # bounded agents
 relio/memory.py        # the engine (add/recall/history/query/graph/transaction)
 relio/backends/        # sqlite.py, postgres.py (StorageBackend)
 relio/embedding/       # base/local/cache (+ batch)
-relio/server/          # app, routes (memory/chat/graph/history), auth, llm, agent
+relio/server/          # app, routes, auth (ApiKeyAuth/JWTAuth), security, llm, agent
 relio/cli/             # main, scaffold, check, dockerfile
 relio/sdkgen.py        # OpenAPI -> TS + Python SDK
 relio/templates/       # web / mobile / desktop scaffolds
