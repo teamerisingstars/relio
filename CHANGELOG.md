@@ -8,7 +8,21 @@ All notable changes to Relio are documented here. The format is based on
 
 _Next cycle — nothing yet._
 
-## [0.1.6] - 2026-07-01
+## [0.1.7] - 2026-07-01
+
+### Added
+- **Logging & observability** (`relio.logs`). One logger tree under `relio` with
+  per-subsystem children (`relio.server`, `relio.agents`, `relio.audit`, …), a
+  `NullHandler` attached on import (never hijacks app logging), and an opt-in
+  `configure_logging(level=, json=, stream=)` — honoring `RELIO_LOG_LEVEL` /
+  `RELIO_LOG_JSON`. Exported as `relio.configure_logging` / `relio.get_logger`.
+- **Tool-call audit trail** (`relio.audit`). Every governed tool invocation logs a
+  structured event — `tool`, `outcome` (`called` / `blocked` / `denied`),
+  `destructive`, and the principal (`tenant`/`user`/`agent`/`session`) — so the
+  exposure-map boundary is auditable. Destructive blocks and agent-slice denials
+  are logged as warnings.
+- **Optional request logging** — `create_app(..., request_logging=True)` logs
+  `METHOD path -> status (ms)` per request to `relio.server.request`.
 
 ### Fixed
 - **Postgres `query()` numeric operators.** `field` / `field__ne` / `field__in`

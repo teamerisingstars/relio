@@ -1,5 +1,6 @@
 from .ai import RelioAI
 from .aiapp import AIApp
+from .logs import configure_logging, get_logger
 from .memory import Memory
 from .record import MemoryRecord, MemoryType, Relation, Scope
 from .interchange import (
@@ -23,4 +24,6 @@ __all__ = [
     "import_record_objects",
     "from_mem0",
     "build_mcp_server",
+    "configure_logging",
+    "get_logger",
 ]

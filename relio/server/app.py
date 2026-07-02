@@ -6,6 +6,7 @@ from typing import Optional, Sequence
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from ..logs import get_logger
 from ..memory import Memory
 from .auth import AuthHook, anonymous_auth
 from .config import Settings
@@ -30,9 +31,29 @@ def create_app(
     rate_limit: Optional[tuple[int, float]] = None,
     max_body_bytes: Optional[int] = None,
     cors_origins: Optional[Sequence[str]] = None,
+    request_logging: bool = False,
 ) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(title="Relio")
+
+    if request_logging:
+        _log = get_logger("server.request")
+
+        @app.middleware("http")
+        async def _log_requests(request: Request, call_next):
+            started = time.time()
+            response = await call_next(request)
+            _log.info(
+                "%s %s -> %s (%.1fms)",
+                request.method, request.url.path, response.status_code,
+                (time.time() - started) * 1000,
+                extra={"relio": {
+                    "method": request.method, "path": request.url.path,
+                    "status": response.status_code,
+                    "ms": round((time.time() - started) * 1000, 1),
+                }},
+            )
+            return response
 
     @app.get("/api/health", operation_id="health")
     def health():

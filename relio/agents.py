@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import Any, Iterator, Optional
 
+from .logs import get_logger
 from .record import MemoryRecord, Scope
+
+_audit = get_logger("audit")
 
 
 class Agent:
@@ -111,8 +114,17 @@ class Agent:
                 yield {"type": "tool_call", "name": name, "arguments": args}
                 spec = self.ai.tools.find(name)
                 if self._allowed is not None and name not in self._allowed:
+                    _audit.warning(
+                        "agent %s denied tool %s (not in slice)", self.name, name,
+                        extra={"relio": {"tool": name, "outcome": "denied", "agent": self.name}},
+                    )
                     output = f"[tool {name} denied: not in this agent's tools]"
                 elif spec is not None and spec.destructive:
+                    _audit.warning(
+                        "agent %s blocked destructive tool %s", self.name, name,
+                        extra={"relio": {"tool": name, "outcome": "blocked",
+                                         "destructive": True, "agent": self.name}},
+                    )
                     output = f"[tool {name} blocked: destructive, needs human confirmation]"
                 else:
                     output = self.ai.call_tool(name, scope=self.space, **args)

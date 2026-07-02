@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from ..logs import get_logger
 from ..server.schemas import ChatRequest
 
-logger = logging.getLogger("relio")
+logger = get_logger("aiapp")
 
 
 def build_agents_router(agents: dict[str, Any]) -> APIRouter:

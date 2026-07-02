@@ -5,6 +5,19 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from .logs import audit_log
+
+
+def _scope_fields(scope: Any) -> dict[str, Any]:
+    """Non-null principal fields for the audit record."""
+    if scope is None:
+        return {}
+    return {
+        f: getattr(scope, f)
+        for f in ("tenant", "user", "agent", "session")
+        if getattr(scope, f, None) is not None
+    }
+
 
 # A tool parameter named `scope` is reserved: it's injected per-call with the
 # current principal's Scope, and hidden from the LLM-facing parameter schema — so
@@ -96,10 +109,25 @@ class ExposureMap:
 
     def call(self, name: str, *, scope: Any = None, confirm: bool = False, **kwargs: Any) -> Any:
         spec = self.get(name)
+        principal = _scope_fields(scope)
         if spec.destructive and not confirm:
+            # Audit the block — a prompt-injected agent hitting a destructive tool
+            # is exactly what you want a trail of.
+            audit_log.warning(
+                "tool %s blocked (destructive, unconfirmed)",
+                name,
+                extra={"relio": {"tool": name, "outcome": "blocked",
+                                 "destructive": True, **principal}},
+            )
             raise PermissionError(
                 f"tool {name!r} is destructive; call with confirm=True to run it"
             )
+        audit_log.info(
+            "tool %s called",
+            name,
+            extra={"relio": {"tool": name, "outcome": "called",
+                             "destructive": spec.destructive, **principal}},
+        )
         if spec.wants_scope:
             kwargs["scope"] = scope  # per-request principal, injected — not LLM-supplied
         return spec.fn(**kwargs)

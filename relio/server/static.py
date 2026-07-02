@@ -1,14 +1,15 @@
 # relio/server/static.py
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-logger = logging.getLogger("relio")
+from ..logs import get_logger
+
+logger = get_logger("server.static")
 
 
 def mount_frontend(app: FastAPI, dist_dir: str) -> None:

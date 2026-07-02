@@ -1,9 +1,9 @@
 # relio/server/security.py
 from __future__ import annotations
 
-import logging
+from ..logs import get_logger
 
-logger = logging.getLogger("relio")
+logger = get_logger("server.security")
 
 
 class RateLimiter:

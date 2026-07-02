@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-import logging
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-logger = logging.getLogger("relio")
-
+from ...logs import get_logger
 from ...memory import Memory
 from ...record import Scope
+
+logger = get_logger("server.chat")
 from ..agent import run_chat
 from ..auth import AuthHook, anonymous_auth
 from ..config import Settings

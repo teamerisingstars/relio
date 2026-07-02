@@ -26,8 +26,6 @@ jobs:
         with:
           python-version: "3.12"
       - id: decide
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -35,8 +33,11 @@ jobs:
             echo "::notice::$VERSION is a dev/pre-release — not publishing"
             echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "::notice::release v$VERSION already exists — nothing to do"
+          # Source of truth is PyPI, not a GitHub tag/release — so a failed publish
+          # (tag pushed, upload failed) still retries cleanly on the next run. A
+          # network error exits non-zero, which correctly falls through to publish.
+          if python -c "import json,urllib.request,sys; d=json.load(urllib.request.urlopen('https://pypi.org/pypi/relio/json',timeout=15)); sys.exit(0 if '$VERSION' in d['releases'] else 1)" 2>/dev/null; then
+            echo "::notice::relio $VERSION is already on PyPI — nothing to do"
             echo "go=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           echo "go=true" >> "$GITHUB_OUTPUT"
@@ -79,12 +80,17 @@ jobs:
             grab {print}
           ' CHANGELOG.md > RELEASE_NOTES.md
           [ -s RELEASE_NOTES.md ] || echo "Release $VERSION" > RELEASE_NOTES.md
-      - name: Create GitHub Release
+      - name: Create/update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$VERSION" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "v$VERSION" \
-            --notes-file RELEASE_NOTES.md \
-            dist/*.whl dist/*.tar.gz
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+              --title "v$VERSION" --notes-file RELEASE_NOTES.md
+            gh release upload "v$VERSION" --repo "$GITHUB_REPOSITORY" --clobber \
+              dist/*.whl dist/*.tar.gz
+          else
+            gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+              --title "v$VERSION" --notes-file RELEASE_NOTES.md \
+              dist/*.whl dist/*.tar.gz
+          fi
