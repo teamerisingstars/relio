@@ -38,8 +38,12 @@ Requires **Python 3.11+** (and Node 18+ only if you scaffold a web/mobile/deskto
 client).
 
 ```bash
-pip install "relio[server]"      # engine + FastAPI server + Claude provider
+pip install "relio[server,local]"   # engine + FastAPI server + Claude provider + local embeddings
 ```
+
+> The default embedder is the **local** model, so include the `local` extra (or
+> `relio[ai]`) for the quickstart below. On a memory-constrained host use a hosted
+> embedder (`RELIO_EMBEDDER=openai|gemini`) or `RELIO_EMBEDDER=deterministic`.
 
 Optional extras (combine, e.g. `.[server,postgres]`):
 
@@ -98,6 +102,16 @@ relio dev                  # backend + Vite dev server on one URL
 
 `relio new` also supports `--mobile` (Expo) and `--desktop` (Tauri), all on the
 same generated TypeScript SDK.
+
+### Prefer a GUI?
+
+```bash
+relio gui                  # opens Relio Studio in your browser (http://127.0.0.1:4000)
+```
+
+**Relio Studio** is a local control panel: create projects, run/stop dev & serve
+with live logs, run build/test/the check gate, deploy, generate SDKs, and browse a
+running app's memory — no terminal needed. See [docs/studio.md](docs/studio.md).
 
 ---
 
@@ -182,6 +196,7 @@ Scaffold one with `relio ai new <name>`.
 |---------|------|
 | `relio new <name> [--web/--mobile/--desktop]` | scaffold an app (+ generated SDK + dev harness) |
 | `relio ai new <name>` | scaffold an **AI-first** app (`AIApp` + a starter agent) |
+| `relio gui [--port] [--no-open]` | open **Relio Studio** — a local GUI to create & control projects |
 | `relio dev` | run backend + frontend dev servers on one URL |
 | `relio build` | build the React frontend |
 | `relio serve [--port]` | serve API + built frontend on one port |
@@ -191,6 +206,8 @@ Scaffold one with `relio ai new <name>`.
 | `relio test [--coverage --min N]` | run the test suites (optionally enforce coverage) |
 | `relio check` | **governance gate** — fail if any module lacks a test and a doc |
 | `relio dockerfile` / `relio deploy [--name]` | production Dockerfile / build image |
+| `relio deploy --target {fly,render,hf}` | container free-hosting config (see [deploying](docs/deploying.md)) |
+| `relio deploy --target {vercel,lambda,netlify}` | serverless config (needs pooled Postgres + `/api/chat/complete`) |
 
 ### The governance gate
 A scaffolded app ships a `CLAUDE.md` (conventions), `docs/`, `tests/`, and a
@@ -208,6 +225,9 @@ undocumented or untested code.
 - **Scale:** `Memory(database_url="postgresql://…")` swaps to **Postgres +
   pgvector** (JSONB + GIN, connection pooling) — no caller changes.
 - **Server config** via `RELIO_*` env (`RELIO_DATABASE_URL`, `RELIO_MODEL`, …).
+- **Free hosting:** scaffolded apps read `DATABASE_URL` from the environment, so
+  pointing at a free managed Postgres (e.g. Neon) makes them deployable to
+  stateless hosts like Render/Fly/HF Spaces. See [deploying](docs/deploying.md).
 
 ---
 

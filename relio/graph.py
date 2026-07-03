@@ -23,11 +23,15 @@ class GraphEngine:
         node = self._backend.get(node_id)
         if node is None:
             return []
+        # Batch the target lookups into one query instead of one get() per edge.
+        target_ids = [
+            rel.target_id for rel in node.relations
+            if predicate is None or rel.predicate == predicate
+        ]
+        fetched = self._backend.get_many(target_ids)
         out: list[MemoryRecord] = []
-        for rel in node.relations:
-            if predicate is not None and rel.predicate != predicate:
-                continue
-            target = self._backend.get(rel.target_id)
+        for tid in target_ids:  # preserve edge order
+            target = fetched.get(tid)
             if target is not None and (scope is None or scope_matches(scope, target.scope)):
                 out.append(target)
         return out
@@ -59,14 +63,28 @@ class GraphEngine:
         frontier = [start_id]
         result: list[MemoryRecord] = []
         for _ in range(depth):
-            next_frontier: list[str] = []
+            # Two batched queries per level (fetch the frontier, then all their
+            # targets) instead of a get() per node and per edge.
+            nodes = self._backend.get_many(frontier)
+            target_ids: list[str] = []
             for node_id in frontier:
-                for nb in self.neighbors(node_id, predicate=predicate, scope=scope):
-                    if nb.id in seen:
-                        continue
-                    seen.add(nb.id)
-                    result.append(nb)
-                    next_frontier.append(nb.id)
+                node = nodes.get(node_id)
+                if node is None:
+                    continue
+                for rel in node.relations:
+                    if predicate is None or rel.predicate == predicate:
+                        target_ids.append(rel.target_id)
+            targets = self._backend.get_many(target_ids)
+            next_frontier: list[str] = []
+            for tid in target_ids:  # BFS order, deduped by `seen`
+                if tid in seen:
+                    continue
+                nb = targets.get(tid)
+                if nb is None or (scope is not None and not scope_matches(scope, nb.scope)):
+                    continue
+                seen.add(tid)
+                result.append(nb)
+                next_frontier.append(tid)
             frontier = next_frontier
             if not frontier:
                 break

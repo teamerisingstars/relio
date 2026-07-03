@@ -22,6 +22,24 @@ def _npm() -> str:
     return shutil.which("npm") or ("npm.cmd" if os.name == "nt" else "npm")
 
 
+def _missing_server_extra() -> bool:
+    """True if FastAPI/uvicorn aren't installed (the `server` extra is absent)."""
+    import importlib.util
+
+    return any(importlib.util.find_spec(m) is None for m in ("uvicorn", "fastapi"))
+
+
+def _needs_server_extra() -> bool:
+    """Preflight: print an install hint and signal failure if the extra is missing."""
+    if _missing_server_extra():
+        print(
+            'This command needs the server extra: pip install "relio[server]"',
+            file=sys.stderr,
+        )
+        return True
+    return False
+
+
 def run(cmd: list[str], cwd: Optional[str] = None) -> int:
     return subprocess.call(cmd, cwd=cwd)
 
@@ -53,8 +71,16 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8000)
 
     sub.add_parser("dockerfile", help="write the production Dockerfile")
-    deploy = sub.add_parser("deploy", help="build the Docker image")
-    deploy.add_argument("--name", default="relio-app", help="image name/tag (default: relio-app)")
+    deploy = sub.add_parser("deploy", help="build the Docker image, or write free-host deploy config")
+    deploy.add_argument("--name", default="relio-app", help="image/app name (default: relio-app)")
+    deploy.add_argument(
+        "--target",
+        choices=["docker", "fly", "render", "hf", "vercel", "lambda", "netlify"],
+        default="docker",
+        help="docker: build the image (default). fly/render/hf: container hosts. "
+             "vercel/lambda/netlify: serverless (needs pooled Postgres + hosted "
+             "embedder; use POST /api/chat/complete instead of SSE).",
+    )
 
     sdk = sub.add_parser("sdk", help="generate TS + Python client SDKs from the API")
     sdk.add_argument("--out", default="sdk", help="output directory (default: sdk)")
@@ -84,6 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="structured-only copy: skip re-embedding (recall won't work until re-embedded)",
     )
 
+    gui = sub.add_parser("gui", help="open Relio Studio: a local GUI to create and control projects")
+    gui.add_argument("--port", type=int, default=4000, help="port to serve Studio on (default: 4000)")
+    gui.add_argument("--host", default="127.0.0.1", help="host to bind (default: 127.0.0.1, local only)")
+    gui.add_argument("--no-open", action="store_true", help="don't open the browser automatically")
+
     ai = sub.add_parser("ai", help="AI-application framework (AIApp) commands")
     ai_sub = ai.add_subparsers(dest="ai_command", required=True)
     ai_new = ai_sub.add_parser("new", help="scaffold an AI-first app (agent + memory)")
@@ -103,9 +134,15 @@ def cmd_new(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
 
 
 def cmd_dev(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    # Start the backend (auto-reload) in the background, then run the Vite dev
-    # server in the foreground (it proxies /api to the backend). Stop the backend
-    # when the dev server exits.
+    if _needs_server_extra():
+        return 1
+    # The default (non-web) scaffold has no vite dev server — running npm would
+    # just error. Detect that and run the backend alone.
+    if not Path("web/package.json").exists():
+        return runner([sys.executable, "-m", "uvicorn", "app:app", "--reload"])
+    # Web scaffold: start the backend (auto-reload) in the background, then run the
+    # Vite dev server in the foreground (it proxies /api to the backend). Stop the
+    # backend when the dev server exits.
     backend = spawner([sys.executable, "-m", "uvicorn", "app:app", "--reload"])
     try:
         return runner([_npm(), "--prefix", "web", "run", "dev"])
@@ -118,18 +155,74 @@ def cmd_build(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
 
 
 def cmd_serve(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
+    if _needs_server_extra():
+        return 1
     return runner(
         [sys.executable, "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", str(args.port)]
     )
 
 
 def cmd_dockerfile(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    Path("Dockerfile").write_text(render_dockerfile())
+    Path("Dockerfile").write_text(render_dockerfile(web=Path("web/package.json").exists()))
     return 0
 
 
+# Container targets build from a Dockerfile; serverless targets don't.
+_CONTAINER_TARGETS = {"fly", "render", "hf"}
+
+_DEPLOY_NEXT_STEPS = {
+    "fly": "Next: `fly launch --copy-config --no-deploy`, `fly secrets set "
+           "ANTHROPIC_API_KEY=… DATABASE_URL=…`, then `fly deploy`.",
+    "render": "Next: push to GitHub, then in Render pick New + > Blueprint. Set "
+              "ANTHROPIC_API_KEY and DATABASE_URL as secrets in the dashboard.",
+    "hf": "Next: create a Docker Space and push this repo; set ANTHROPIC_API_KEY, "
+          "DATABASE_URL, RELIO_EMBEDDER under the Space's Variables & secrets.",
+    "vercel": "Next: `vercel` to deploy. Set DATABASE_URL (Neon *pooled* URL), "
+              "ANTHROPIC_API_KEY, and RELIO_EMBEDDER=openai|gemini as env vars. "
+              "Serverless buffers SSE — clients should POST /api/chat/complete.",
+    "lambda": "Next: add `mangum` to requirements.txt, then `serverless deploy`. "
+              "Use a pooled DATABASE_URL and RELIO_EMBEDDER=openai|gemini. "
+              "Clients should POST /api/chat/complete (SSE degrades on Lambda).",
+    "netlify": "Next: set the backend host in netlify.toml's /api/* redirect, then "
+               "`netlify deploy`. Netlify serves the frontend; the Python backend "
+               "runs on Vercel/Lambda/a container.",
+}
+
+
 def cmd_deploy(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
-    return runner(["docker", "build", "-t", getattr(args, "name", "relio-app"), "."])
+    from .deploytargets import files_for
+
+    name = getattr(args, "name", "relio-app")
+    target = getattr(args, "target", "docker")
+    if target == "docker":
+        if shutil.which("docker") is None:
+            print(
+                "Docker not found. Install Docker, or write a free-host config "
+                "instead: relio deploy --target render|fly|hf|vercel|lambda",
+                file=sys.stderr,
+            )
+            return 1
+        return runner(["docker", "build", "-t", name, "."])
+
+    # Container targets need a Dockerfile for the platform to build; serverless
+    # ones don't. Write the platform config, creating parent dirs (e.g. api/).
+    # Never clobber an existing file (e.g. a project's README) — print it instead.
+    if target in _CONTAINER_TARGETS and not Path("Dockerfile").exists():
+        # Match the project shape so a web app's frontend actually gets built.
+        Path("Dockerfile").write_text(
+            render_dockerfile(web=Path("web/package.json").exists())
+        )
+        print("wrote Dockerfile")
+    for fname, content in files_for(target, name).items():
+        path = Path(fname)
+        if path.exists():
+            print(f"{fname} already exists — add this yourself:\n\n{content}")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+            print(f"wrote {fname}")
+    print(_DEPLOY_NEXT_STEPS.get(target, ""))
+    return 0
 
 
 def cmd_sdk(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
@@ -227,6 +320,32 @@ def cmd_migrate(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int
     return 0
 
 
+def _open_browser(url: str) -> None:
+    # Best-effort: never let a missing/blocked browser stop the server.
+    import webbrowser
+
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
+def cmd_gui(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
+    # Serve Relio Studio via uvicorn (shelling out mirrors `relio serve`, so it's
+    # testable through the injected runner). Open the browser first — it'll connect
+    # once the server is up a moment later.
+    if _needs_server_extra():
+        return 1
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 4000)
+    if not getattr(args, "no_open", False):
+        _open_browser(f"http://{host}:{port}")
+    return runner(
+        [sys.executable, "-m", "uvicorn", "relio.studio.launch:app",
+         "--host", host, "--port", str(port)]
+    )
+
+
 def cmd_ai(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
     if args.ai_command == "new":
         from .scaffold import write_ai_scaffold
@@ -238,6 +357,7 @@ def cmd_ai(args: argparse.Namespace, runner: Runner, spawner: Spawn) -> int:
 
 _HANDLERS: dict[str, Callable[[argparse.Namespace, Runner, Spawn], int]] = {
     "new": cmd_new,
+    "gui": cmd_gui,
     "ai": cmd_ai,
     "dev": cmd_dev,
     "build": cmd_build,

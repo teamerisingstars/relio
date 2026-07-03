@@ -24,6 +24,23 @@ def test_recall_filters_by_scope(tmp_path):
     be.close()
 
 
+def test_recall_not_starved_by_another_tenants_closer_vectors(tmp_path):
+    # Regression (multi-tenant): with a fixed over-fetch, tenant bob's matches
+    # could be crowded out of the top-k by many closer alice vectors, so bob got
+    # too few. Adaptive over-fetch must still return bob's `limit` results.
+    engine, be, emb = _engine(tmp_path)
+    for i in range(60):  # lots of near-identical alice vectors
+        a = MemoryRecord(content="apple pie recipe", scope=Scope(user="alice"))
+        be.add(a, emb.embed(a.content))
+    for i in range(3):
+        b = MemoryRecord(content="apple pie recipe", scope=Scope(user="bob"))
+        be.add(b, emb.embed(b.content))
+    results = engine.recall("apple pie recipe", scope=Scope(user="bob"), limit=3)
+    assert len(results) == 3
+    assert all(r.scope.user == "bob" for r in results)
+    be.close()
+
+
 def test_recall_filters_by_type(tmp_path):
     engine, be, emb = _engine(tmp_path)
     f = MemoryRecord(type=MemoryType.FACT, content="lives in Kerala")

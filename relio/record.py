@@ -63,3 +63,12 @@ class MemoryRecord(BaseModel):
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     schema_version: str = "1.0"
+
+    def is_expired(self, now: float) -> bool:
+        """True if this record's TTL has elapsed by `now` (epoch seconds).
+
+        `ttl=None` means permanent. This is the single source of truth for
+        expiry, enforced on every read path (recall, query, history, get)."""
+        if self.ttl is None:
+            return False
+        return self.created_at.timestamp() + self.ttl < now

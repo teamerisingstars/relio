@@ -59,6 +59,28 @@ def test_traverse_reaches_grandchild(tmp_path):
     m.close()
 
 
+def test_traverse_batches_lookups_no_per_edge_get(tmp_path, monkeypatch):
+    # Regression (N+1): traverse must batch via get_many, not call get() per
+    # node/edge. A depth-2 chain of 3 nodes should issue very few single get()s.
+    m = _mem(tmp_path)
+    a = m.add_node("A")
+    b = m.add_node("B")
+    c = m.add_node("C")
+    m.add_edge(a.id, "to", b.id)
+    m.add_edge(b.id, "to", c.id)
+    calls = {"get": 0}
+    real_get = m._backend.get
+    monkeypatch.setattr(
+        m._backend, "get",
+        lambda rid: (calls.__setitem__("get", calls["get"] + 1), real_get(rid))[1],
+    )
+    reached = m.traverse(a.id, depth=2)
+    assert {n.content for n in reached} == {"B", "C"}
+    # Batched: get_many does the work, so single-get() calls stay ~0.
+    assert calls["get"] <= 1
+    m.close()
+
+
 def test_traverse_is_cycle_safe(tmp_path):
     m = _mem(tmp_path)
     a = m.add_node("A")

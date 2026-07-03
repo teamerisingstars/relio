@@ -92,19 +92,33 @@ def test_serve_runs_uvicorn_on_the_port():
     ]
 
 
-def test_deploy_builds_the_docker_image():
+def test_deploy_builds_the_docker_image(monkeypatch):
+    monkeypatch.setattr("relio.cli.main.shutil.which", lambda _: "/usr/bin/docker")
     runner = FakeRunner()
     main(["deploy"], runner=runner)
     assert runner.calls == [["docker", "build", "-t", "relio-app", "."]]
 
 
-def test_deploy_custom_image_name():
+def test_deploy_custom_image_name(monkeypatch):
+    monkeypatch.setattr("relio.cli.main.shutil.which", lambda _: "/usr/bin/docker")
     runner = FakeRunner()
     main(["deploy", "--name", "myimg"], runner=runner)
     assert runner.calls == [["docker", "build", "-t", "myimg", "."]]
 
 
-def test_dev_starts_backend_and_frontend_then_stops_backend():
+def test_deploy_docker_missing_gives_hint(monkeypatch, capsys):
+    monkeypatch.setattr("relio.cli.main.shutil.which", lambda _: None)
+    runner = FakeRunner()
+    assert main(["deploy"], runner=runner) == 1
+    assert runner.calls == []  # no build attempted
+    assert "Docker not found" in capsys.readouterr().err
+
+
+def test_dev_starts_backend_and_frontend_then_stops_backend(tmp_path, monkeypatch):
+    # A web scaffold has web/package.json → run backend + vite dev server.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "package.json").write_text("{}")
     runner = FakeRunner()
     spawner = FakeSpawn()
     main(["dev"], runner=runner, spawner=spawner)
@@ -112,6 +126,17 @@ def test_dev_starts_backend_and_frontend_then_stops_backend():
     (cmd,) = runner.calls
     assert _is_npm(cmd[0]) and cmd[1:] == ["--prefix", "web", "run", "dev"]
     assert spawner.proc.terminated is True
+
+
+def test_dev_without_web_package_just_runs_the_backend(tmp_path, monkeypatch):
+    # Default (non-web) scaffold has only web/index.html — `relio dev` must not
+    # try to run npm (which would error); it just runs uvicorn --reload.
+    monkeypatch.chdir(tmp_path)
+    runner = FakeRunner()
+    spawner = FakeSpawn()
+    assert main(["dev"], runner=runner, spawner=spawner) == 0
+    assert spawner.calls == []  # no npm/vite child spawned
+    assert runner.calls == [[sys.executable, "-m", "uvicorn", "app:app", "--reload"]]
 
 
 def test_dockerfile_writes_a_dockerfile(tmp_path, monkeypatch):
@@ -197,7 +222,9 @@ def test_ai_new_scaffolds_an_ai_app(tmp_path, monkeypatch):
     app_py = tmp_path / "assistant" / "app.py"
     assert app_py.is_file()
     assert "AIApp" in app_py.read_text()
-    assert "relio[ai]" in (tmp_path / "assistant" / "requirements.txt").read_text()
+    assert "DATABASE_URL" in app_py.read_text()  # deploy-ready (managed Postgres)
+    reqs = (tmp_path / "assistant" / "requirements.txt").read_text()
+    assert "relio[ai" in reqs and "postgres" in reqs
     # the AI-app scaffold also satisfies the governance gate
     from relio.cli.check import check_project
 

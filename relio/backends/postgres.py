@@ -78,6 +78,16 @@ class PostgresBackend(StorageBackend):
             )
             # GIN index makes structured query() (Feature J) indexed on jsonb.
             cur.execute("CREATE INDEX IF NOT EXISTS idx_doc_gin ON records USING GIN (doc)")
+            # ANN index so recall() doesn't do an exact full-table KNN scan — this
+            # is the whole point of the Postgres "scale path". HNSW needs pgvector
+            # >= 0.5.0; degrade gracefully to an exact scan if it's unavailable.
+            try:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_embedding_hnsw "
+                    "ON records USING hnsw (embedding vector_l2_ops)"
+                )
+            except Exception:
+                conn.rollback()  # older pgvector: no HNSW — recall still works, just slower
 
     @staticmethod
     def _expires_at(record: MemoryRecord) -> float | None:
@@ -108,6 +118,16 @@ class PostgresBackend(StorageBackend):
         if row is None:
             return None
         return _to_record(row[0])
+
+    def get_many(self, ids) -> dict[str, MemoryRecord]:
+        ids = list(ids)
+        if not ids:
+            return {}
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT doc FROM records WHERE id = ANY(%s)", (ids,))
+            rows = cur.fetchall()
+        recs = (_to_record(r[0]) for r in rows)
+        return {r.id: r for r in recs}
 
     def delete(self, record_id: str) -> bool:
         with self._conn() as conn, conn.cursor() as cur:
@@ -154,6 +174,7 @@ class PostgresBackend(StorageBackend):
         order_by: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        newest_first: bool = False,
     ) -> list[MemoryRecord]:
         clauses: list[str] = []
         params: list[object] = []
@@ -197,7 +218,7 @@ class PostgresBackend(StorageBackend):
                 clauses.append(f"{lhs} = %s")
                 params.append(value)
         where_sql = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        order_sql = " ORDER BY rid"
+        order_sql = " ORDER BY rid DESC" if newest_first else " ORDER BY rid"
         if order_by:
             desc = order_by.startswith("-")
             field = order_by.lstrip("-")
@@ -226,6 +247,9 @@ class PostgresBackend(StorageBackend):
                     yield
             finally:
                 self._active.reset(token)
+
+    def supports_sql(self) -> bool:
+        return True
 
     def sql(self, query: str, params: Optional[tuple] = None) -> list[dict]:
         """Run a **read-only** analytical SQL query against the `records` table and

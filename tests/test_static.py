@@ -1,4 +1,4 @@
-# tests/test_static.py
+# tests/test_static.py — exercises relio/server/static.py (mount_frontend).
 import pytest
 from fastapi.testclient import TestClient
 
@@ -6,6 +6,7 @@ from relio.memory import Memory
 from relio.embedding.base import DeterministicEmbedder
 from relio.server.app import create_app
 from relio.server.llm.fake import FakeProvider
+from relio.server.static import mount_frontend  # module under test
 
 
 def _client(tmp_path):
@@ -50,6 +51,16 @@ def test_unknown_api_route_is_404_not_spa(tmp_path):
     resp = client.get("/api/does-not-exist")
     assert resp.status_code == 404
     assert "INDEX" not in resp.text
+    memory.close()
+
+
+def test_path_traversal_is_blocked(tmp_path):
+    # A secret outside the dist dir must not be reachable via encoded `..`.
+    (tmp_path / "secret.txt").write_text("TOP-SECRET")
+    client, memory = _client(tmp_path)
+    for attack in ("/..%2fsecret.txt", "/%2e%2e/secret.txt", "/..%2f..%2fsecret.txt"):
+        resp = client.get(attack)
+        assert "TOP-SECRET" not in resp.text, f"leaked via {attack}"
     memory.close()
 
 

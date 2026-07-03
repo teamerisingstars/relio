@@ -10,11 +10,18 @@ def test_scaffold_creates_runnable_starter(tmp_path):
     assert (root / "requirements.txt").is_file()
     assert (root / "README.md").is_file()
 
-    assert "create_app" in (root / "app.py").read_text()
+    app_py = (root / "app.py").read_text()
+    assert "create_app" in app_py
+    # Deploy-ready: uses managed Postgres when DATABASE_URL is set, SQLite locally.
+    assert "DATABASE_URL" in app_py and "os.environ" in app_py
     index = (root / "web" / "index.html").read_text()
     assert "myapp" in index and "/api/chat" in index
-    assert "relio[server]" in (root / "requirements.txt").read_text()
+    reqs = (root / "requirements.txt").read_text()
+    assert "relio[server" in reqs and "postgres" in reqs
     assert "uvicorn" in (root / "Dockerfile").read_text()
+    # Secrets must be git-ignored (deploy docs tell users to push to public repos).
+    gi = (root / ".gitignore").read_text()
+    assert ".env" in gi and "!.env.example" in gi
 
 
 def test_scaffold_includes_dev_harness_and_passes_check(tmp_path):

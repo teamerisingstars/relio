@@ -45,4 +45,15 @@ def build_chat_router(
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+    @router.post("/chat/complete", operation_id="chat_complete")
+    def chat_complete(req: ChatRequest, scope: Scope = Depends(principal)):
+        # Non-streaming reply: the whole turn as one JSON response. Serverless
+        # hosts (Vercel/Lambda) often buffer or time-limit streamed responses, so
+        # SSE degrades there — this endpoint fits within a single request/response.
+        scope = scope.model_copy(update={"session": req.session})
+        reply = "".join(
+            run_chat(memory, provider, req.message, scope, limit=settings.recall_limit)
+        )
+        return {"reply": reply}
+
     return router

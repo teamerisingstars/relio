@@ -24,7 +24,7 @@ def create_app(
     provider: Optional[LLMProvider] = None,
     settings: Optional[Settings] = None,
     frontend_dir: Optional[str] = None,
-    auth: AuthHook = anonymous_auth,
+    auth: Optional[AuthHook] = None,
     *,
     extra_routers: Optional[Sequence[object]] = None,  # router | (router, protected: bool)
     protect_extra_routers: bool = True,
@@ -34,6 +34,16 @@ def create_app(
     request_logging: bool = False,
 ) -> FastAPI:
     settings = settings or Settings()
+    # No auth hook wired = every request gets a wildcard scope, so query/search/
+    # history read ACROSS all tenants and writes have empty scope. Keep the
+    # zero-config default working, but warn loudly so it isn't shipped unnoticed.
+    if auth is None:
+        auth = anonymous_auth
+        get_logger("server.app").warning(
+            "create_app() has no auth= hook: all requests use a wildcard scope "
+            "(cross-tenant reads/writes). Pass auth=ApiKeyAuth(...)/JWTAuth(...) "
+            "for production, or auth=anonymous_auth to silence this."
+        )
     app = FastAPI(title="Relio")
 
     if request_logging:

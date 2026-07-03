@@ -5,15 +5,21 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from .dockerfile import render_dockerfile
+
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 
 _APP_PY = '''\
+import os
+
 from relio import Memory
 from relio.server import create_app
 from relio.server.llm.claude import ClaudeProvider
 
-# One SQLite file, one local memory store. The chat LLM uses ANTHROPIC_API_KEY.
-memory = Memory(path="relio.db")
+# Locally: one SQLite file. In production set DATABASE_URL (e.g. a free Neon
+# Postgres) and memory persists there — so this deploys to stateless hosts.
+# The chat LLM uses ANTHROPIC_API_KEY.
+memory = Memory(path="relio.db", database_url=os.environ.get("DATABASE_URL"))
 app = create_app(memory, ClaudeProvider(), frontend_dir="web")
 '''
 
@@ -70,19 +76,16 @@ document.getElementById('f').onsubmit = async (e) => {{
 </html>
 """
 
-_DOCKERFILE = """\
-FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . ./
-EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
-"""
+# Dockerfiles are rendered from relio.cli.dockerfile (single source of truth).
 
-_REQUIREMENTS = "relio[server]\n"
+# Include postgres so a deployed image can use managed Postgres via DATABASE_URL;
+# locally, with no DATABASE_URL, the app still uses SQLite.
+_REQUIREMENTS = "relio[server,postgres]\n"
 
-_GITIGNORE = "__pycache__/\n*.db\n*.db-wal\n*.db-shm\n"
+# Secrets (API keys, DATABASE_URL) live in .env for local dev — never commit them,
+# especially since the deploy docs tell users to push to public repos.
+_ENV_IGNORE = ".env\n.env.*\n!.env.example\n"
+_GITIGNORE = "__pycache__/\n*.db\n*.db-wal\n*.db-shm\n" + _ENV_IGNORE
 
 _README = """\
 # {name}
@@ -102,43 +105,35 @@ Open http://localhost:8000
 docker build -t {name} .
 docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-... {name}
 ```
+
+## Deploy free (managed Postgres so memory persists)
+Create a free Neon Postgres, then write a platform config and follow its steps:
+```
+relio deploy --target render     # or: fly | hf
+```
+Set `DATABASE_URL` (Neon), `ANTHROPIC_API_KEY`, and `RELIO_EMBEDDER` as secrets.
+Without `DATABASE_URL` the app uses local SQLite. See the Relio deploying guide.
 """
 
 
 _WEB_APP_PY = '''\
+import os
+
 from relio import Memory
 from relio.server import create_app
 from relio.server.llm.claude import ClaudeProvider
 
-# One SQLite file, one local memory store. The chat LLM uses ANTHROPIC_API_KEY.
-# In production the built React app (web/dist) is served on the same port.
-memory = Memory(path="relio.db")
+# Locally: one SQLite file. In production set DATABASE_URL (e.g. a free Neon
+# Postgres) and memory persists there — so this deploys to stateless hosts.
+# The chat LLM uses ANTHROPIC_API_KEY; the built React app (web/dist) is served
+# on the same port.
+memory = Memory(path="relio.db", database_url=os.environ.get("DATABASE_URL"))
 app = create_app(memory, ClaudeProvider(), frontend_dir="web/dist")
 '''
 
-_WEB_DOCKERFILE = """\
-# syntax=docker/dockerfile:1
-
-# --- stage 1: build the React frontend ---
-FROM node:20-slim AS web
-WORKDIR /web
-COPY web/package.json ./
-RUN npm install
-COPY web/ ./
-RUN npm run build
-
-# --- stage 2: python runtime serving API + built frontend on one port ---
-FROM python:3.12-slim AS runtime
-WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . ./
-COPY --from=web /web/dist ./web/dist
-EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
-"""
-
-_WEB_GITIGNORE = "__pycache__/\n*.db\n*.db-wal\n*.db-shm\nweb/node_modules/\nweb/dist/\n"
+_WEB_GITIGNORE = (
+    "__pycache__/\n*.db\n*.db-wal\n*.db-shm\nweb/node_modules/\nweb/dist/\n" + _ENV_IGNORE
+)
 
 _WEB_README = """\
 # {name}
@@ -164,6 +159,13 @@ relio sdk --out web/src/sdk
 docker build -t {name} .
 docker run -p 8000:8000 -e ANTHROPIC_API_KEY=sk-... {name}
 ```
+
+## Deploy free (managed Postgres so memory persists)
+```
+relio deploy --target render     # or: fly | hf
+```
+Set `DATABASE_URL` (a free Neon Postgres), `ANTHROPIC_API_KEY`, and
+`RELIO_EMBEDDER` as secrets. Without `DATABASE_URL` the app uses local SQLite.
 """
 
 
@@ -226,12 +228,16 @@ _CLAUDE_SETTINGS = """\
 
 
 _AI_APP_PY = '''\
+import os
+
 from relio.aiapp import AIApp
 from relio.server.llm.claude import ClaudeProvider
 
 # An AI-first app: a bounded "assistant" agent with its own memory, served over
-# HTTP. The chat LLM uses ANTHROPIC_API_KEY.
-ai_app = AIApp(provider=ClaudeProvider())
+# HTTP. The chat LLM uses ANTHROPIC_API_KEY. Locally memory is one SQLite file;
+# set DATABASE_URL (e.g. a free Neon Postgres) in production and it persists
+# there — so this deploys to stateless hosts.
+ai_app = AIApp(provider=ClaudeProvider(), database_url=os.environ.get("DATABASE_URL"))
 ai_app.agent("assistant", system="You are a helpful assistant.")
 app = ai_app.build()   # /api/chat, /api/agents/{name}/chat, /api/memory, /api/graph
 '''
@@ -255,6 +261,13 @@ Endpoints: `GET /api/agents`, `POST /api/agents/assistant/chat` (SSE),
 ## Develop
 - `relio develop "<what to build>"` — build features with Claude Code.
 - `relio test` — run tests.  `relio check` — every module needs a test + doc.
+
+## Deploy free (managed Postgres so memory persists)
+```
+relio deploy --target render     # or: fly | hf
+```
+Set `DATABASE_URL` (a free Neon Postgres), `ANTHROPIC_API_KEY`, and
+`RELIO_EMBEDDER` as secrets. Without `DATABASE_URL` the app uses local SQLite.
 """
 
 
@@ -264,8 +277,8 @@ def write_ai_scaffold(target: str, name: Optional[str] = None) -> Path:
     name = name or root.name
     root.mkdir(parents=True, exist_ok=True)
     (root / "app.py").write_text(_AI_APP_PY, encoding="utf-8")
-    (root / "Dockerfile").write_text(_DOCKERFILE, encoding="utf-8")
-    (root / "requirements.txt").write_text("relio[ai]\n", encoding="utf-8")
+    (root / "Dockerfile").write_text(render_dockerfile(web=False), encoding="utf-8")
+    (root / "requirements.txt").write_text("relio[ai,postgres]\n", encoding="utf-8")
     (root / ".gitignore").write_text(_GITIGNORE, encoding="utf-8")
     (root / "README.md").write_text(_AI_README.format(name=name), encoding="utf-8")
     _write_dev_harness(root, name)
@@ -309,7 +322,7 @@ def write_scaffold(
     (root / "web").mkdir(parents=True, exist_ok=True)
     (root / "app.py").write_text(_APP_PY, encoding="utf-8")
     (root / "web" / "index.html").write_text(_INDEX_HTML.format(name=name), encoding="utf-8")
-    (root / "Dockerfile").write_text(_DOCKERFILE, encoding="utf-8")
+    (root / "Dockerfile").write_text(render_dockerfile(web=False), encoding="utf-8")
     (root / "requirements.txt").write_text(_REQUIREMENTS, encoding="utf-8")
     (root / ".gitignore").write_text(_GITIGNORE, encoding="utf-8")
     (root / "README.md").write_text(_README.format(name=name), encoding="utf-8")
@@ -335,7 +348,7 @@ def _write_web_scaffold(root: Path, name: str) -> Path:
     _write_ts_sdk(root / "web" / "src" / "sdk")
 
     (root / "app.py").write_text(_WEB_APP_PY, encoding="utf-8")
-    (root / "Dockerfile").write_text(_WEB_DOCKERFILE, encoding="utf-8")
+    (root / "Dockerfile").write_text(render_dockerfile(web=True), encoding="utf-8")
     (root / "requirements.txt").write_text(_REQUIREMENTS, encoding="utf-8")
     (root / ".gitignore").write_text(_WEB_GITIGNORE, encoding="utf-8")
     (root / "README.md").write_text(_WEB_README.format(name=name), encoding="utf-8")
@@ -370,7 +383,7 @@ def _write_mobile_scaffold(root: Path, name: str) -> Path:
     # A thin Expo client; the SDK lives at src/sdk and talks to a Relio backend.
     shutil.copytree(_TEMPLATES / "mobile", root, dirs_exist_ok=True)
     _write_ts_sdk(root / "src" / "sdk")
-    (root / ".gitignore").write_text("node_modules/\n.expo/\ndist/\n", encoding="utf-8")
+    (root / ".gitignore").write_text("node_modules/\n.expo/\ndist/\n" + _ENV_IGNORE, encoding="utf-8")
     return root
 
 
@@ -380,5 +393,5 @@ def _write_desktop_scaffold(root: Path, name: str) -> Path:
     shutil.copytree(_TEMPLATES / "web", root, dirs_exist_ok=True)
     shutil.copytree(_TEMPLATES / "desktop", root, dirs_exist_ok=True)
     _write_ts_sdk(root / "src" / "sdk")
-    (root / ".gitignore").write_text("node_modules/\ndist/\nsrc-tauri/target/\n", encoding="utf-8")
+    (root / ".gitignore").write_text("node_modules/\ndist/\nsrc-tauri/target/\n" + _ENV_IGNORE, encoding="utf-8")
     return root

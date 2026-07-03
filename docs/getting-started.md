@@ -6,8 +6,12 @@ Requires **Python 3.11+** (and Node 18+ only if you scaffold a web/mobile/deskto
 client).
 
 ```bash
-pip install "relio[server]"     # engine + FastAPI server + Claude provider
+pip install "relio[server,local]"   # + local embeddings (the default embedder)
 ```
+
+> The default embedder is the **local** model — include `local` (or use `relio[ai]`)
+> for the quickstart. Memory-constrained host? Use `RELIO_EMBEDDER=openai|gemini`
+> (hosted) or `RELIO_EMBEDDER=deterministic` (demo).
 
 Optional extras (combine, e.g. `.[server,postgres]`):
 

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Relio Studio</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="dot"></span> Relio <span class="brand-sub">Studio</span>
+      </div>
+      <div class="side-actions">
+        <button id="btn-new" class="btn btn-primary">+ New project</button>
+        <button id="btn-import" class="btn">Add existing</button>
+        <button id="btn-scan" class="btn">Scan folder</button>
+      </div>
+      <div class="side-head">
+        <span>Projects</span>
+        <button id="btn-refresh" class="icon-btn" title="Refresh">&#10227;</button>
+      </div>
+      <ul id="project-list" class="project-list"></ul>
+    </aside>
+
+    <main class="main">
+      <div id="empty" class="empty">
+        <h1>Relio Studio</h1>
+        <p>Create a project, or select one on the left to run and control it.</p>
+      </div>
+
+      <section id="detail" class="detail" hidden>
+        <header class="detail-head">
+          <div>
+            <h1 id="d-name"></h1>
+            <p id="d-path" class="muted mono"></p>
+          </div>
+          <div class="detail-head-right">
+            <span id="d-kind" class="badge"></span>
+            <button id="btn-remove" class="btn btn-ghost">Remove</button>
+          </div>
+        </header>
+
+        <nav class="tabs">
+          <button class="tab active" data-tab="run">Run</button>
+          <button class="tab" data-tab="tasks">Tasks</button>
+          <button class="tab" data-tab="deploy">Deploy</button>
+          <button class="tab" data-tab="memory">Memory</button>
+        </nav>
+
+        <!-- RUN -->
+        <div class="tabpane" data-pane="run">
+          <div class="controls">
+            <div class="ctl-group">
+              <span class="ctl-label">First time?</span>
+              <button class="btn action" data-action="install">Install deps</button>
+            </div>
+            <div class="ctl-group">
+              <span class="ctl-label">Dev server <small class="muted">(vite + backend)</small></span>
+              <button class="btn action" data-action="dev">Start dev</button>
+              <button class="btn btn-ghost stop" data-stop="dev">Stop</button>
+            </div>
+            <div class="ctl-group">
+              <span class="ctl-label">Serve <small class="muted">(one port)</small></span>
+              <input id="serve-port" class="input port" type="number" value="8000" />
+              <button class="btn action" data-action="serve">Start serve</button>
+              <button class="btn btn-ghost stop" data-stop="serve">Stop</button>
+            </div>
+            <a id="open-app" class="btn btn-link" target="_blank" hidden>Open app &#8599;</a>
+          </div>
+        </div>
+
+        <!-- TASKS -->
+        <div class="tabpane" data-pane="tasks" hidden>
+          <div class="controls">
+            <button class="btn action" data-action="build">Build</button>
+            <button class="btn action" data-action="test">Test</button>
+            <button id="btn-check" class="btn">Run check gate</button>
+          </div>
+          <div id="check-result" class="check-result" hidden></div>
+        </div>
+
+        <!-- DEPLOY -->
+        <div class="tabpane" data-pane="deploy" hidden>
+          <div class="controls">
+            <div class="ctl-group">
+              <button class="btn action" data-action="dockerfile">Write Dockerfile</button>
+            </div>
+            <div class="ctl-group">
+              <span class="ctl-label">Name</span>
+              <input id="image-name" class="input" type="text" value="relio-app" />
+              <span class="ctl-label">Target</span>
+              <select id="deploy-target" class="input">
+                <option value="docker">docker — build image</option>
+                <option value="render">render — free web service</option>
+                <option value="fly">fly — Docker-native</option>
+                <option value="hf">hf — Hugging Face Space</option>
+                <option value="vercel">vercel — serverless</option>
+                <option value="lambda">lambda — AWS serverless</option>
+                <option value="netlify">netlify — static + proxy</option>
+              </select>
+              <button class="btn action" data-action="deploy">Deploy</button>
+            </div>
+            <div class="ctl-group">
+              <span class="ctl-label">SDK out</span>
+              <input id="sdk-out" class="input" type="text" value="sdk" />
+              <button class="btn action" data-action="sdk">Generate SDK</button>
+            </div>
+          </div>
+          <p class="muted">Free targets write a platform config + Dockerfile and print next steps in the output. Set <strong>DATABASE_URL</strong> (Neon), <strong>ANTHROPIC_API_KEY</strong>, and <strong>RELIO_EMBEDDER</strong> as secrets on the platform.</p>
+        </div>
+
+        <!-- MEMORY -->
+        <div class="tabpane" data-pane="memory" hidden>
+          <p class="muted">Embeds the running app (start <strong>dev</strong> or <strong>serve</strong> first) so you can browse its chat &amp; memory.</p>
+          <div id="mem-wrap" class="mem-wrap"></div>
+        </div>
+
+        <!-- LOG CONSOLE (shared) -->
+        <section class="console">
+          <div class="console-head">
+            <span id="log-title">Output</span>
+            <span id="log-status" class="pill"></span>
+            <button id="btn-clear-log" class="icon-btn" title="Clear">&#128465;</button>
+          </div>
+          <pre id="log" class="log"></pre>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <h2 id="modal-title"></h2>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="modal-ok" class="btn btn-primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

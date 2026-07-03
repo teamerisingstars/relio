@@ -19,6 +19,10 @@ _EXCLUDE_DIRS = {
     ".pytest_cache",
 }
 _EXCLUDE_FILES = {"__init__.py"}
+# For gathering test *evidence*, only vendor/build dirs are off-limits — a
+# `.test.`/`.spec.` file under a nested `tests/`, `docs/`, etc. is still real
+# evidence and must not be dropped (that made TS enforcement silently a no-op).
+_VENDOR_DIRS = {"node_modules", ".git", "__pycache__", "dist", "build", ".pytest_cache"}
 _SRC_SUFFIXES = {".py", ".ts", ".tsx"}
 # Non-source files among those suffixes (tests, specs, configs, declarations).
 _NON_SOURCE_MARKERS = (".test.", ".spec.", ".config.")
@@ -65,7 +69,9 @@ def _test_corpus(root: Path) -> str:
         files += [f for f in tests_dir.rglob("*") if f.is_file()]
     for f in root.rglob("*"):
         if f.is_file() and any(m in f.name for m in (".test.", ".spec.")):
-            if not _excluded(f.relative_to(root)):
+            # Only skip vendor/build output — NOT `tests`/`docs` — so co-located
+            # or `frontend/tests/`-style specs still count as evidence.
+            if not any(part in _VENDOR_DIRS for part in f.relative_to(root).parts):
                 files.append(f)
     return "\n".join(_read(f) for f in files)
 

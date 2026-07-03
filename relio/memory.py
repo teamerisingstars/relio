@@ -1,6 +1,7 @@
 # relio/memory.py
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from typing import Any, Mapping, Optional, Union
 
@@ -16,6 +17,8 @@ from .render import render_lines
 
 class Memory:
     """The one public entry point: add / recall / get / forget / link."""
+
+    _RECALL_CACHE_MAX = 256  # cap the in-process recall cache (see recall()).
 
     def __init__(
         self,
@@ -138,16 +141,20 @@ class Memory:
     def history(self, scope: Optional[Scope] = None, limit: int = 20) -> list[MemoryRecord]:
         """Return the last `limit` conversation turns for `scope`, oldest first.
 
-        Chronological (insertion order), not semantic: relies on the backend
-        returning records in insertion order from `all()`.
+        Uses the backend's indexed `newest_first` query (filtering type + scope in
+        SQL) rather than loading and parsing the whole table on every chat turn.
         """
         scope = scope or Scope()
-        turns = [
-            r
-            for r in self._backend.all()
-            if r.type is MemoryType.SESSION and scope_matches(scope, r.scope)
-        ]
-        return turns[-limit:] if limit else turns
+        now = time.time()
+        # Over-fetch a little so expiry filtering can't leave us short of `limit`.
+        fetch = max(limit * 2, limit) if limit else 0
+        recent = self._backend.query(
+            type=MemoryType.SESSION, scope=scope,
+            limit=fetch or 1_000_000, newest_first=True,
+        )
+        live = [r for r in recent if not r.is_expired(now)]
+        turns = live[:limit] if limit else live
+        return list(reversed(turns))  # newest_first query → back to oldest-first
 
     def recall(
         self,
@@ -166,6 +173,10 @@ class Memory:
         if cached is not None:
             return cached
         result = self._recall.recall(query, scope=scope, type=type, limit=limit)
+        # Bounded LRU-ish cache: evict the oldest entry once full so a long-lived,
+        # read-heavy server with many distinct queries can't grow memory forever.
+        if len(self._recall_cache) >= self._RECALL_CACHE_MAX:
+            self._recall_cache.pop(next(iter(self._recall_cache)))
         self._recall_cache[key] = result
         return result
 
@@ -188,21 +199,26 @@ class Memory:
         Unlike recall(), this needs no query embedding and returns records that
         were never embedded — the path for non-AI / data-style listing.
         """
-        return self._backend.query(
-            type=type, scope=scope, where=where, order_by=order_by, limit=limit, offset=offset
-        )
+        now = time.time()
+        return [
+            r
+            for r in self._backend.query(
+                type=type, scope=scope, where=where,
+                order_by=order_by, limit=limit, offset=offset,
+            )
+            if not r.is_expired(now)
+        ]
 
     def sql(self, query: str, params: Optional[tuple] = None) -> list[dict]:
         """Read-only analytical SQL over the store — the escape hatch for
         joins/GROUP BY/window functions that `query()` intentionally doesn't do.
         **Postgres backend only** (`database_url=...`); raises otherwise."""
-        run = getattr(self._backend, "sql", None)
-        if run is None:
+        if not self._backend.supports_sql():
             raise NotImplementedError(
                 "sql() analytics require the Postgres backend — construct "
                 "Memory(database_url='postgres://…'). SQLite has no analytics path."
             )
-        return run(query, params)
+        return self._backend.sql(query, params)
 
     def iter_records(self) -> list[MemoryRecord]:
         """Every stored record, oldest first — the raw view used for export /
@@ -222,7 +238,10 @@ class Memory:
         return self._backend.transaction()
 
     def get(self, record_id: str) -> Optional[MemoryRecord]:
-        return self._backend.get(record_id)
+        rec = self._backend.get(record_id)
+        if rec is not None and rec.is_expired(time.time()):
+            return None  # expired = logically gone on every read path
+        return rec
 
     def forget(self, record_id: str) -> bool:
         ok = self._backend.delete(record_id)

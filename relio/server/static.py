@@ -31,13 +31,18 @@ def mount_frontend(app: FastAPI, dist_dir: str) -> None:
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
 
+    base = dist.resolve()
+
     @app.get("/{full_path:path}")
     def spa(full_path: str) -> FileResponse:
         # An unknown /api/* path is a real 404 (JSON), not the SPA shell — so
         # missing/typo'd API routes don't silently return index.html.
         if full_path == "api" or full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="not found")
-        candidate = dist / full_path
-        if full_path and candidate.is_file():
+        # Resolve and confine to `dist` — Starlette percent-decodes but does not
+        # normalize `..`, so `..%2f` would otherwise escape the web root (arbitrary
+        # file read). Anything outside falls through to the SPA shell.
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(base):
             return FileResponse(str(candidate))
         return FileResponse(str(index))

@@ -70,3 +70,13 @@ def test_chat_streams_deltas_then_done_and_captures(client):
     # The turn was captured — searching finds the user message.
     found = client.get("/api/memory/search", params={"q": "chess", "user": "alice"})
     assert any("chess" in r["content"] for r in found.json()["results"])
+
+
+def test_chat_complete_returns_full_reply_as_json(client):
+    # Non-streaming endpoint for serverless hosts that buffer/limit responses:
+    # one JSON reply instead of an SSE stream.
+    resp = client.post("/api/chat/complete", json={"message": "I enjoy chess", "user": "alice"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    body = resp.json()
+    assert "I enjoy chess" in body["reply"]

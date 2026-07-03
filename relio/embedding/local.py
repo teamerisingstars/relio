@@ -11,7 +11,15 @@ class LocalEmbedder(Embedder):
     """Local, zero-API-cost embedder using fastembed (ONNX)."""
 
     def __init__(self, model_name: str = _DEFAULT_MODEL) -> None:
-        from fastembed import TextEmbedding
+        try:
+            from fastembed import TextEmbedding
+        except ImportError as exc:  # the default embedder, but not in the base install
+            raise ImportError(
+                "Local embeddings need fastembed: pip install 'relio[local]' "
+                "(or 'relio[ai]'). For a zero-dependency stand-in set "
+                "RELIO_EMBEDDER=deterministic, or use a hosted embedder "
+                "(RELIO_EMBEDDER=openai|gemini)."
+            ) from exc
 
         self._model_name = model_name
         self._model = TextEmbedding(model_name=model_name)

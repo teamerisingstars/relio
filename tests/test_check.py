@@ -71,6 +71,22 @@ def test_typescript_component_is_gated(tmp_path):
     assert check_project(tmp_path) == []
 
 
+def test_test_files_under_a_tests_dir_still_count_as_evidence(tmp_path):
+    # Regression: a component whose test lives in frontend/tests/ (a nested `tests`
+    # dir) was wrongly flagged untested, because the corpus builder excluded any
+    # path containing a `tests` part — dropping real .test.tsx evidence.
+    _clean_project(tmp_path)
+    src = tmp_path / "frontend" / "src" / "components"
+    src.mkdir(parents=True)
+    (src / "Widget.tsx").write_text("export function Widget() { return null; }\n")
+    ftests = tmp_path / "frontend" / "tests"
+    ftests.mkdir(parents=True)
+    (ftests / "Widget.test.tsx").write_text("test('Widget renders', () => {});\n")
+    (tmp_path / "docs" / "Widget.md").write_text("# Widget\n")
+    missing = {(v.path, v.missing) for v in check_project(tmp_path)}
+    assert ("frontend/src/components/Widget.tsx", "test") not in missing
+
+
 def test_generated_sdk_and_declaration_files_are_excluded(tmp_path):
     _clean_project(tmp_path)
     sdk = tmp_path / "web" / "src" / "sdk"
